@@ -1,0 +1,28 @@
+{
+ "cpu": "Intel64 Family 6 Model 154 Stepping 3, GenuineIntel",
+ "cpu_count": 20,
+ "rf_n_jobs": 2,
+ "n_images": 240,
+ "warmup_images": 20,
+ "repeats": [
+  {
+   "total_s": 4370.917476499977,
+   "mean_per_image_s": 18.212081783333392,
+   "p95_per_image_s": 18.873442174990487,
+   "images_per_s": 0.054908380515154585
+  },
+  {
+   "total_s": 4337.093038299994,
+   "mean_per_image_s": 18.071149315416672,
+   "p95_per_image_s": 18.846126354992155,
+   "images_per_s": 0.05533660400655656
+  },
+  {
+   "total_s": 4322.578775200003,
+   "mean_per_image_s": 18.01067251375025,
+   "p95_per_image_s": 18.56071788498957,
+   "images_per_s": 0.05552241207886265
+  }
+ ],
+ "peak_rss_mb": 533.109375
+}
