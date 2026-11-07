@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+runs/
+work/
+checkpoints/*.pt
+vendor/source/
+vendor/*.whl
+*.cache

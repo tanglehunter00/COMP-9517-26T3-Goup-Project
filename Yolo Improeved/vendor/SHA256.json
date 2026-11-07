@@ -1,0 +1,5 @@
+{
+  "checkpoints\\yolo11s.pt": "85a76fe86dd8afe384648546b56a7a78580c7cb7b404fc595f97969322d502d5",
+  "vendor\\dysample.py": "c3f8dff42b81ce292c44165b99275d2803af77da6aff2046ee8a1dbcb753f233",
+  "vendor\\ultralytics-8.3.221-py3-none-any.whl": "ee8d3715b1e14d4ad0305c3b1c085ff79901a8cf1aa011988838bd4c61f18b17"
+}
