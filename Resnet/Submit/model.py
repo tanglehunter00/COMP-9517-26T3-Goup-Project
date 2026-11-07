@@ -2,19 +2,25 @@ import torch
 import torchvision
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
-
 def get_faster_rcnn_model(weights_path=None, num_classes=2):
     """
     Builds and configures Faster R-CNN ResNet50-FPN V2 according to the fixed protocol:
-    - Trainable backbone layers = 3
-    - Freezes backbone BatchNorm running statistics and affine parameters
-    - Replaces predictor for background + bird (num_classes = 2)
-    - Configures RPN pre/post-NMS limits, IoU thresholds, and RoI sampling
+    - RPN pre/post-NMS limits: 2000/1000 (train), 1000/1000 (eval)
+    - RPN NMS IoU: 0.7
+    - RoI sampling: 512 proposals, positive fraction 0.25
+    - RoI output NMS: 0.6
     """
-    # Initialize Faster R-CNN V2 with 3 trainable backbone layers
-    # (trainable_backbone_layers=3 freezes layers 0, 1, and part of 2 in resnet50_fpn_v2)
+    # Initialize with keyword arguments for RPN and RoI settings
     model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(
-        weights=None, trainable_backbone_layers=3
+        weights=None,
+        rpn_pre_nms_top_n_train=2000,
+        rpn_pre_nms_top_n_test=1000,
+        rpn_post_nms_top_n_train=1000,
+        rpn_post_nms_top_n_test=1000,
+        rpn_nms_thresh=0.7,
+        box_batch_size_per_image=512,
+        box_positive_fraction=0.25,
+        box_nms_thresh=0.6
     )
 
     # Load official COCO checkpoint weights if provided
@@ -22,6 +28,11 @@ def get_faster_rcnn_model(weights_path=None, num_classes=2):
         print(f"Loading checkpoint weights from {weights_path}...")
         state_dict = torch.load(weights_path, map_location="cpu")
         model.load_state_dict(state_dict, strict=False)
+
+    # Configure trainable backbone layers = 3 (freeze stem, layer1, and layer2)
+    for name, parameter in model.backbone.named_parameters():
+        if any(prefix in name for prefix in ["conv1", "bn1", "body.layer1", "body.layer2"]):
+            parameter.requires_grad = False
 
     # Freeze backbone BatchNorm running stats and affine parameters explicitly
     def set_bn_eval_and_freeze(module):
@@ -32,22 +43,8 @@ def get_faster_rcnn_model(weights_path=None, num_classes=2):
 
     model.backbone.apply(set_bn_eval_and_freeze)
 
-    # Replace the box predictor head for our 2 classes (0: background, 1: bird)
+    # Replace the box predictor head for 2 classes (0: background, 1: bird)
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
-
-    # Configure RPN parameters as per spec:
-    # - pre/post-NMS limits: 2000/1000 during training, 1000/1000 during evaluation
-    # - RPN NMS IoU: 0.7
-    model.rpn.pre_nms_top_n = {"training": 2000, "testing": 1000}
-    model.rpn.post_nms_top_n = {"training": 1000, "testing": 1000}
-    model.rpn.nms_thresh = 0.7
-
-    # Configure RoI sampling and NMS as per spec:
-    # - RoI sampling 512 proposals per image with positive fraction 0.25
-    # - RoI output greedy hard NMS IoU 0.6
-    model.roi_heads.batch_size_per_image = 512
-    model.roi_heads.positive_fraction = 0.25
-    model.roi_heads.nms_thresh = 0.6  # RoI output NMS
 
     return model

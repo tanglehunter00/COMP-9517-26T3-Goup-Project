@@ -1,7 +1,4 @@
-train_dir = "/content/data/Beach Bird Detection Dataset v1.0/images/train"
-train_anns = "/content/data/Beach Bird Detection Dataset v1.0/labels/train"
-val_dir = "/content/data/Beach Bird Detection Dataset v1.0/images/val"
-val_anns = "/content/data/Beach Bird Detection Dataset v1.0/labels/val"
+
 
 import os
 import time
@@ -38,12 +35,11 @@ def adjust_learning_rate(optimizer, epoch, iteration, num_iterations_per_epoch, 
 
 def train_model():
     # Configuration
-    train_dir = "./data/train"  # Update paths as needed
-    val_dir = "./data/val"
-    train_anns = []  # Load or pass your annotation list here
-    val_anns = []    # Load or pass your annotation list here
-    
-    weights_path = "./fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth"
+    train_dir = "/content/data/Beach Bird Detection Dataset v1.0/images/train"
+    train_anns = "/content/data/Beach Bird Detection Dataset v1.0/labels/train"
+    val_dir = "/content/data/Beach Bird Detection Dataset v1.0/images/val"
+    val_anns = "/content/data/Beach Bird Detection Dataset v1.0/labels/val"
+    weights_path = "/content/COMP-9517-26T3-Goup-Project/Resnet/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth"
     output_dir = "./checkpoints_m3"
     os.makedirs(output_dir, exist_ok=True)
 
@@ -68,7 +64,7 @@ def train_model():
     num_epochs = 100
     accumulation_steps = 2
     peak_lr = 0.0025
-    best_ap50 = 0.0.0
+    best_ap50 = 0.0
     best_ap50_95 = 0.0
 
     print("Starting M3 Training...")
@@ -134,7 +130,7 @@ def train_model():
         torch.save(checkpoint, last_path)
 
         if (epoch + 1) % 10 == 0:
-        archived_path = os.path.join(output_dir, f"checkpoint_epoch_{epoch+1}.pth")
+          archived_path = os.path.join(output_dir, f"checkpoint_epoch_{epoch+1}.pth")
         torch.save(checkpoint, archived_path)
 
         # Update best model based on AP50 and tie-breakers
