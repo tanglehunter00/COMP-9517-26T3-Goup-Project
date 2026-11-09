@@ -59,6 +59,35 @@ def save_atomic(path, obj):
     os.replace(tmp, path)
 
 
+def to_cpu(obj):
+    """Snapshot (copy) every tensor to CPU so a background save never sees later in-place updates."""
+    if torch.is_tensor(obj):
+        return obj.detach().to("cpu", copy=True)
+    if isinstance(obj, dict):
+        return {k: to_cpu(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(to_cpu(v) for v in obj)
+    return obj
+
+
+class Writer:
+    """One background thread writes checkpoints to Drive while the GPU keeps training. Single worker =
+    writes land in submission order (best/archive before last.pt). Each epoch waits for the previous
+    epoch's writes, so at most one epoch of snapshots sits in RAM and a failed write raises promptly."""
+
+    def __init__(self):
+        from concurrent.futures import ThreadPoolExecutor
+        self.pool, self.pending = ThreadPoolExecutor(max_workers=1), []
+
+    def wait(self):
+        for f in self.pending:
+            f.result()
+        self.pending = []
+
+    def save(self, path, obj):
+        self.pending.append(self.pool.submit(save_atomic, path, obj))
+
+
 def sync(device):
     if device.type == "cuda":
         torch.cuda.synchronize(device)
@@ -138,6 +167,7 @@ def main():
     save_atomic(out / "config.json", json.dumps(config, indent=2))
     save_atomic(out / "model.txt", str(model))
 
+    writer = Writer()
     run_start = time.perf_counter()
     for epoch in range(start, a.epochs):
         # Per-epoch seeds: an interrupted epoch replays identically on resume.
@@ -188,7 +218,8 @@ def main():
         key = (metrics["AP50"] or 0.0, metrics["AP50:95"] or 0.0)
         improved = key > best
         best = max(best, key)
-        state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+        writer.wait()  # previous epoch's files are fully on disk before this epoch's are queued
+        state = to_cpu(model.state_dict())
         log = dict(epoch=epoch + 1, loss=sum(losses.values()), **losses, lr=lr, updates=updates,
                    loss_scale=scaler.get_scale(), train_s=round(train_s, 1), val_s=round(val_s, 1),
                    peak_gpu_mb=round(peak_mb), **metrics, best=improved)
@@ -196,15 +227,16 @@ def main():
 
         # Order matters for crash safety: best/archive first, last.pt (the resume point) after.
         if improved:
-            save_atomic(out / "best.pt", dict(model=state, epoch=epoch + 1, metrics=metrics))
+            writer.save(out / "best.pt", dict(model=state, epoch=epoch + 1, metrics=metrics))
         if (epoch + 1) % 10 == 0:
-            save_atomic(out / f"epoch{epoch + 1:03d}.pt", dict(model=state, epoch=epoch + 1, metrics=metrics))
-        save_atomic(last, dict(model=state, optimizer=optimizer.state_dict(), scaler=scaler.state_dict(),
+            writer.save(out / f"epoch{epoch + 1:03d}.pt", dict(model=state, epoch=epoch + 1, metrics=metrics))
+        writer.save(last, dict(model=state, optimizer=to_cpu(optimizer.state_dict()), scaler=scaler.state_dict(),
                                epoch=epoch + 1, epochs=a.epochs, n_train=n_train, robust=a.robust, updates=updates,
-                               best=best, history=history))
-        save_atomic(out / "metrics.jsonl", "".join(json.dumps(h) + "\n" for h in history))
+                               best=best, history=list(history)))
+        writer.save(out / "metrics.jsonl", "".join(json.dumps(h) + "\n" for h in history))
         print(json.dumps(log), flush=True)
 
+    writer.wait()
     # Protocol: test only after all training is complete, using the selected best checkpoint.
     best_ck = torch.load(out / "best.pt", map_location="cpu", weights_only=False)
     model.load_state_dict(best_ck["model"])
