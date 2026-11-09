@@ -1,15 +1,3 @@
-"""M3: Faster R-CNN ResNet50-FPN V2, trained exactly per the COMP9517 protocol (sections 3 and 5).
-
-Self-resuming: re-running with the same --out continues from last.pt (model, optimizer, AMP scaler,
-schedule position, best score, history). When all epochs are done it exports val/test predictions from
-best.pt in original-image coordinates (clean and distorted val/test) and writes DONE.
-Re-running a finished run does nothing.
-
-Overfitting control: best.pt is the epoch with the highest clean val AP50 (not the last epoch), and
-metrics.jsonl logs train loss next to val AP every epoch. --robust is a separate, non-protocol run.
-
-    python train.py --data "/content/data/Beach Bird Detection Dataset v1.0" --out /content/drive/MyDrive/comp9517/m3
-"""
 import argparse
 import json
 import math
@@ -29,13 +17,11 @@ from evaluate import coco_ground_truth, coco_metrics, predict, write_csv
 from model import PROTOCOL_KWARGS, get_faster_rcnn_model
 
 SEED, EPOCHS = 42, 100
-BATCH, ACCUM, VAL_BATCH = 2, 2, 8  # effective batch 4
+BATCH, ACCUM, VAL_BATCH = 2, 2, 8
 PEAK_LR, MOMENTUM, WEIGHT_DECAY, WARMUP_EPOCHS = 0.0025, 0.9, 0.0001, 1
 
 
 def lr_at(update, total, warmup):
-    """Linear warm-up from 10% of peak to peak, then cosine decay to 1% of peak at the final update.
-    Indexed by optimizer updates."""
     if update < warmup:
         return PEAK_LR * (0.1 + 0.9 * update / warmup)
     progress = (update - warmup) / max(total - warmup - 1, 1)
@@ -50,7 +36,6 @@ def seed_all(seed):
 
 
 def save_atomic(path, obj):
-    """Write-then-rename, so a disconnect mid-save never corrupts the previous checkpoint."""
     tmp = Path(str(path) + ".tmp")
     if isinstance(obj, str):
         tmp.write_text(obj)
@@ -60,7 +45,6 @@ def save_atomic(path, obj):
 
 
 def to_cpu(obj):
-    """Snapshot (copy) every tensor to CPU so a background save never sees later in-place updates."""
     if torch.is_tensor(obj):
         return obj.detach().to("cpu", copy=True)
     if isinstance(obj, dict):
@@ -71,9 +55,6 @@ def to_cpu(obj):
 
 
 class Writer:
-    """One background thread writes checkpoints to Drive while the GPU keeps training. Single worker =
-    writes land in submission order (best/archive before last.pt). Each epoch waits for the previous
-    epoch's writes, so at most one epoch of snapshots sits in RAM and a failed write raises promptly."""
 
     def __init__(self):
         from concurrent.futures import ThreadPoolExecutor
@@ -113,7 +94,7 @@ def main():
         raise SystemExit("The protocol run needs a CUDA GPU (Colab T4). Use --epochs/--limit for CPU smoke tests.")
 
     seed_all(SEED)
-    # Inputs are always 640x640, so cuDNN autotuning picks the fastest conv kernels once and reuses them.
+
     torch.backends.cudnn.benchmark = True
 
     def loader(split, batch, train=False, generator=None, corrupt=False):
@@ -170,7 +151,7 @@ def main():
     writer = Writer()
     run_start = time.perf_counter()
     for epoch in range(start, a.epochs):
-        # Per-epoch seeds: an interrupted epoch replays identically on resume.
+
         seed_all(SEED + epoch)
         generator.manual_seed(SEED + epoch)
         model.train()
@@ -183,13 +164,13 @@ def main():
             images = [im.to(device, non_blocking=True).float().div_(255) for im in images]
             targets = [{"boxes": t["boxes"].to(device, non_blocking=True),
                         "labels": t["labels"].to(device, non_blocking=True)} for t in targets]
-            # Images in this accumulation group (the last group of an epoch may be partial).
+
             group_images = min(BATCH * ACCUM, n_train - (i // ACCUM) * BATCH * ACCUM)
             with torch.autocast(device.type, dtype=torch.float16, enabled=device.type == "cuda"):
                 loss_dict = model(images, targets)
             loss = sum(loss_dict.values())
-            # torchvision losses are per-batch means; weighting by batch/group size makes each update the
-            # mean over the images actually accumulated, including the partial tail group.
+
+
             scaler.scale(loss * len(images) / group_images).backward()
             for k, v in loss_dict.items():
                 loss_sums[k] = loss_sums.get(k, 0.0) + v.detach() * len(images)
@@ -198,7 +179,7 @@ def main():
                 lr = lr_at(updates, total, warmup)
                 for group in optimizer.param_groups:
                     group["lr"] = lr
-                scaler.step(optimizer)  # skips the step (and lowers the scale) if FP16 grads overflowed
+                scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad(set_to_none=True)
                 updates += 1
@@ -214,18 +195,18 @@ def main():
         sync(device)
         val_s = time.perf_counter() - t0
 
-        # best: highest val AP50, ties by AP50:95, then the earlier epoch (strict >).
+
         key = (metrics["AP50"] or 0.0, metrics["AP50:95"] or 0.0)
         improved = key > best
         best = max(best, key)
-        writer.wait()  # previous epoch's files are fully on disk before this epoch's are queued
+        writer.wait()
         state = to_cpu(model.state_dict())
         log = dict(epoch=epoch + 1, loss=sum(losses.values()), **losses, lr=lr, updates=updates,
                    loss_scale=scaler.get_scale(), train_s=round(train_s, 1), val_s=round(val_s, 1),
                    peak_gpu_mb=round(peak_mb), **metrics, best=improved)
         history.append(log)
 
-        # Order matters for crash safety: best/archive first, last.pt (the resume point) after.
+
         if improved:
             writer.save(out / "best.pt", dict(model=state, epoch=epoch + 1, metrics=metrics))
         if (epoch + 1) % 10 == 0:
@@ -237,12 +218,12 @@ def main():
         print(json.dumps(log), flush=True)
 
     writer.wait()
-    # Protocol: test only after all training is complete, using the selected best checkpoint.
+
     best_ck = torch.load(out / "best.pt", map_location="cpu", weights_only=False)
     model.load_state_dict(best_ck["model"])
     final = {"best_epoch": best_ck["epoch"], "train_wall_s": round(time.perf_counter() - run_start, 1)}
-    # Clean splits are the protocol results; *_distorted are fixed seeded corruptions (blur, noise, JPEG,
-    # dark, low contrast) of the same images, scored identically, to compare robustness across runs.
+
+
     for split in ("val", "test"):
         for corrupt in (False, True):
             name = split + ("_distorted" if corrupt else "")
@@ -257,8 +238,8 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # All outputs are already written atomically and closed. Exit hard so a DataLoader worker or
-    # multiprocessing helper stuck in interpreter teardown can't block the notebook cell forever.
+
+
     sys.stdout.flush()
     sys.stderr.flush()
     os._exit(0)

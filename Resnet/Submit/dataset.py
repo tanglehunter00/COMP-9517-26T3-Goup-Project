@@ -9,8 +9,6 @@ from torch.utils.data import DataLoader, Dataset
 
 
 def seed_worker(worker_id):
-    """Deterministic per-worker seeds derived from the loader generator, so they change every epoch
-    (a fixed 42 + worker_id would replay the same flip sequence each epoch)."""
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
@@ -26,22 +24,14 @@ class BeachBirdDataset(Dataset):
         pad_color=(114, 114, 114),
         corrupt=False,
     ):
-        """
-        Args:
-            img_dir (str): Path to the directory containing images.
-            label_dir (str): Path to the directory containing YOLO .txt annotation files.
-            transform (callable, optional): Optional transform to be applied on a sample.
-            target_size (int): Target canvas dimension (640x640).
-            pad_color (tuple): RGB padding color, default (114, 114, 114).
-        """
         self.img_dir = img_dir
         self.label_dir = label_dir
         self.transform = transform
         self.target_size = target_size
         self.pad_color = pad_color
-        self.corrupt = corrupt  # evaluation only: fixed, seeded distortion per image
+        self.corrupt = corrupt
 
-        # Get all valid image filenames (sorted for determinism)
+
         valid_extensions = (".jpg", ".jpeg", ".png")
         self.image_files = sorted(
             [f for f in os.listdir(img_dir) if f.lower().endswith(valid_extensions)]
@@ -55,16 +45,16 @@ class BeachBirdDataset(Dataset):
         file_name = self.image_files[idx]
         img_path = os.path.join(self.img_dir, file_name)
 
-        # Load image
+
         image = Image.open(img_path).convert("RGB")
         orig_width, orig_height = image.size
         if self.corrupt:
             image = corrupt_image(image, idx)
 
-        # Aspect-preserving resize and padding to target_size x target_size
+
         image, scale, pad_w, pad_h = self._resize_and_pad(image)
 
-        # Load corresponding YOLO label file (.txt)
+
         base_name, _ = os.path.splitext(file_name)
         label_path = os.path.join(self.label_dir, base_name + ".txt")
 
@@ -76,10 +66,10 @@ class BeachBirdDataset(Dataset):
                     parts = line.strip().split()
                     if len(parts) >= 5:
                         class_id = int(parts[0])
-                        # YOLO format: x_center, y_center, width, height (normalized 0-1)
+
                         x_center, y_center, w_norm, h_norm = map(float, parts[1:5])
 
-                        # Convert normalized YOLO to absolute pixel coordinates
+
                         box_w = w_norm * orig_width
                         box_h = h_norm * orig_height
                         box_x_center = x_center * orig_width
@@ -90,13 +80,13 @@ class BeachBirdDataset(Dataset):
                         x_max = box_x_center + box_w / 2
                         y_max = box_y_center + box_h / 2
 
-                        # Scale and pad coordinates to match 640x640 canvas
+
                         x_min_new = x_min * scale + pad_w
                         y_min_new = y_min * scale + pad_h
                         x_max_new = x_max * scale + pad_w
                         y_max_new = y_max * scale + pad_h
 
-                        # Clip boxes to canvas boundaries
+
                         x_min_new = max(0.0, min(float(self.target_size), x_min_new))
                         y_min_new = max(0.0, min(float(self.target_size), y_min_new))
                         x_max_new = max(0.0, min(float(self.target_size), x_max_new))
@@ -104,17 +94,17 @@ class BeachBirdDataset(Dataset):
 
                         if x_max_new > x_min_new and y_max_new > y_min_new:
                             boxes.append([x_min_new, y_min_new, x_max_new, y_max_new])
-                            # Single foreground class: 'bird' (mapped to class ID 1, background is 0)
+
                             labels.append(1)
 
         boxes = torch.as_tensor(boxes, dtype=torch.float32)
         labels = torch.as_tensor(labels, dtype=torch.int64)
 
-        # Apply augmentations (e.g., horizontal flip with p=0.5)
+
         if self.transform is not None:
             image, boxes = self.transform(image, boxes)
 
-        # Format target dictionary required by torchvision Faster R-CNN
+
         target = {
             "boxes": boxes
             if len(boxes) > 0
@@ -123,11 +113,11 @@ class BeachBirdDataset(Dataset):
             if len(labels) > 0
             else torch.zeros((0,), dtype=torch.int64),
             "image_id": torch.tensor([idx], dtype=torch.int64),
-            # letterbox params to map predictions back to original-image pixels
+
             "meta": torch.tensor([scale, pad_w, pad_h, orig_width, orig_height], dtype=torch.float64),
         }
 
-        # uint8 [C, H, W]; converted to float [0, 1] on the GPU (4x less host-to-device traffic)
+
         image_tensor = torch.from_numpy(np.asarray(image, dtype=np.uint8).copy()).permute(2, 0, 1)
 
         return image_tensor, target
@@ -138,10 +128,10 @@ class BeachBirdDataset(Dataset):
         new_width = int(round(orig_width * scale))
         new_height = int(round(orig_height * scale))
 
-        # Resize image maintaining aspect ratio
+
         image = image.resize((new_width, new_height), Image.Resampling.BILINEAR)
 
-        # Create padded canvas
+
         new_image = Image.new(
             "RGB", (self.target_size, self.target_size), self.pad_color
         )
@@ -153,7 +143,6 @@ class BeachBirdDataset(Dataset):
 
 
 class HorizontalFlipTransform:
-    """Applies horizontal flip augmentation with a given probability (M3 spec: 0.5)."""
 
     def __init__(self, p=0.5):
         self.p = p
@@ -162,7 +151,7 @@ class HorizontalFlipTransform:
         if random.random() < self.p:
             image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
             if len(boxes) > 0:
-                # Flip x coordinates: x_min_new = width - x_max, x_max_new = width - x_min
+
                 width = image.width
                 old_x_min = boxes[:, 0].clone()
                 old_x_max = boxes[:, 2].clone()
@@ -188,8 +177,6 @@ def _jpeg(image, quality):
 
 
 class PhotometricDistort:
-    """--robust run only (non-protocol): random colour jitter, blur, sensor noise and JPEG artefacts.
-    Pixel-only, so boxes are unchanged. Uses the per-worker seeded `random`, so runs stay reproducible."""
 
     def __init__(self, p=0.25):
         self.p = p
@@ -221,8 +208,6 @@ CORRUPTIONS = ("blur", "noise", "jpeg", "dark", "low_contrast")
 
 
 def corrupt_image(image, idx):
-    """Fixed distorted copy for robustness evaluation: image idx always gets the same corruption
-    (cycling through CORRUPTIONS) at a fixed moderate severity, applied to the original image."""
     rng = np.random.default_rng(10_000 + idx)
     kind = CORRUPTIONS[idx % len(CORRUPTIONS)]
     if kind == "blur":
@@ -237,14 +222,10 @@ def corrupt_image(image, idx):
 
 
 def collate_fn(batch):
-    """Custom collate function for object detection batching."""
     return tuple(zip(*batch))
 
 
 def make_loader(root, split, batch_size, train=False, generator=None, robust=False, corrupt=False):
-    """Loader for <root>/images/<split> + <root>/labels/<split>. Protocol: 2 workers, no dropped batches,
-    train shuffled with a seeded generator and horizontal flip 0.5; val/test unaugmented.
-    robust=True adds PhotometricDistort to training; corrupt=True gives the fixed distorted eval copy."""
     transform = None
     if train:
         flip = HorizontalFlipTransform(p=0.5)

@@ -13,9 +13,6 @@ from PIL import Image
 
 @torch.inference_mode()
 def predict(model, data_loader, device):
-    """Detections for every image, mapped from the 640 letterbox canvas back to original-image pixels.
-    The model already applies the protocol post-processing (score >= 0.001, one greedy NMS at IoU 0.6,
-    max 300 per image), so no second suppression is run here."""
     model.eval()
     dataset = data_loader.dataset
     rows = []
@@ -37,7 +34,6 @@ def predict(model, data_loader, device):
 
 
 def write_csv(path, rows):
-    """Protocol export format: image_id (file stem), category_id (0 = bird), x, y, width, height, score."""
     fields = ["image_id", "category_id", "x", "y", "width", "height", "score"]
     with open(path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
@@ -46,7 +42,6 @@ def write_csv(path, rows):
 
 
 def coco_ground_truth(dataset):
-    """COCO-format ground truth in original-image pixels, read straight from the YOLO label files."""
     images, annotations = [], []
     for idx, name in enumerate(dataset.image_files):
         with Image.open(os.path.join(dataset.img_dir, name)) as im:
@@ -71,8 +66,6 @@ def coco_ground_truth(dataset):
 
 
 def coco_metrics(dataset, rows, gt=None):
-    """AP50, AP50:95, AP75, AP-small and AR@300 with maxDets [1, 10, 300]. Reads the 300-cap arrays
-    directly because COCOeval.summarize() hard-codes a 100 cap."""
     from pycocotools.coco import COCO
     from pycocotools.cocoeval import COCOeval
 
@@ -89,11 +82,11 @@ def coco_metrics(dataset, rows, gt=None):
         ev.params.maxDets = [1, 10, 300]
         ev.evaluate()
         ev.accumulate()
-    precision, recall = ev.eval["precision"], ev.eval["recall"]  # [T,R,K,A,M], [T,K,A,M]
+    precision, recall = ev.eval["precision"], ev.eval["recall"]
 
     def mean(x):
         x = x[x > -1]
-        return float(x.mean()) if x.size else None  # None = N/A (e.g. no small objects)
+        return float(x.mean()) if x.size else None
 
     return {"AP50": mean(precision[0, :, 0, 0, 2]), "AP50:95": mean(precision[:, :, 0, 0, 2]),
             "AP75": mean(precision[5, :, 0, 0, 2]), "AP_small": mean(precision[:, :, 0, 1, 2]),
@@ -103,13 +96,10 @@ def coco_metrics(dataset, rows, gt=None):
 def compute_operating_point_metrics(
     results, gt_annotations, iou_thresh=0.5, score_thresh=0.25
 ):
-    """
-    Computes Precision, Recall, F1, and False Positives per Negative Image at score threshold 0.25 and IoU 0.5.
-    """
-    # Filter predictions by score threshold 0.25
+
     filtered_results = [r for r in results if r["score"] >= score_thresh]
 
-    # Group predictions and ground truths by image_id
+
     preds_by_img = {}
     for p in filtered_results:
         preds_by_img.setdefault(p["image_id"], []).append(p)
@@ -135,15 +125,15 @@ def compute_operating_point_metrics(
                 false_positives += len(preds)
             continue
 
-        gt_boxes = np.array([gt["bbox"] for gt in gts])  # [x, y, w, h]
-        # Convert [x, y, w, h] to [x1, y1, x2, y2] for IoU calculation
+        gt_boxes = np.array([gt["bbox"] for gt in gts])
+
         gt_boxes_xyxy = np.copy(gt_boxes)
         gt_boxes_xyxy[:, 2] += gt_boxes_xyxy[:, 0]
         gt_boxes_xyxy[:, 3] += gt_boxes_xyxy[:, 1]
 
         matched_gts = set()
 
-        # Sort predictions by score descending
+
         preds = sorted(preds, key=lambda x: x["score"], reverse=True)
 
         for pred in preds:
@@ -155,11 +145,11 @@ def compute_operating_point_metrics(
                 pred_box[1] + pred_box[3],
             ]
 
-            # Compute IoUs with all ground truths in the image
+
             best_iou = 0.0
             best_gt_idx = -1
             for idx, gt_box in enumerate(gt_boxes_xyxy):
-                # Calculate IoU
+
                 iou = box_iou_single(pred_box_xyxy, gt_box)
                 if iou > best_iou:
                     best_iou = iou
@@ -201,7 +191,6 @@ def compute_operating_point_metrics(
 
 
 def box_iou_single(box1, box2):
-    """Helper to calculate IoU between two [x1, y1, x2, y2] boxes."""
     x1 = max(box1[0], box2[0])
     y1 = max(box1[1], box2[1])
     x2 = min(box1[2], box2[2])
