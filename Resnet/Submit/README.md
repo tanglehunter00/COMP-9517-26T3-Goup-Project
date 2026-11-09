@@ -29,16 +29,27 @@ Robustness check (not a protocol result): the same `best.pt` scored on fixed, se
 | Val (distorted) | 0.840 | 0.452 | 0.427 | 0.262 | 0.401 | 0.550 |
 | Test (distorted) | 0.812 | 0.440 | 0.417 | 0.261 | 0.376 | 0.539 |
 
+### M3-robust (non-protocol variant)
+
+Identical to M3 except for extra training-time distortion augmentation (p 0.8 brightness/contrast/saturation x[0.6, 1.4]; p 0.25 each Gaussian blur r[0.5, 2], Gaussian noise sd[3, 15], JPEG quality [20, 70]). It is **not** a protocol configuration and is reported separately. Best epoch: **17**.
+
+| Split | AP50 | AP50:95 | AP75 | AP-small | AR-small | AR@300 |
+|---|---|---|---|---|---|---|
+| Val | 0.883 | 0.477 | 0.449 | 0.302 | 0.472 | 0.582 |
+| Test | 0.895 | 0.499 | 0.487 | 0.343 | 0.472 | 0.586 |
+| Val (distorted) | 0.862 | 0.461 | 0.432 | 0.268 | 0.436 | 0.564 |
+| Test (distorted) | 0.867 | 0.470 | 0.456 | 0.307 | 0.429 | 0.560 |
+
 ## Training time
 
 Hardware: Google Colab, NVIDIA Tesla T4. Python 3.13.16, torch 2.14.1+cu130, torchvision 0.29.1+cu130.
 
-| Stage | Time |
-|---|---|
-| Pure training (100 epochs) | 15,657.9 s (about 157 s per epoch) |
-| Validation (100 x 291 images) | 1,781.3 s (about 18 s per epoch) |
-| **Total run (training + validation)** | **17,469.6 s (4.85 h)** |
-| Peak allocated GPU memory | 1,896 MB |
+| Stage | M3 | M3-robust (non-protocol) |
+|---|---|---|
+| Pure training (100 epochs) | 15,657.9 s (about 157 s per epoch) | 16,082.5 s (about 161 s per epoch) |
+| Validation (100 x 291 images) | 1,781.3 s (about 18 s per epoch) | 1,811.7 s (about 18 s per epoch) |
+| **Total run (training + validation)** | **17,469.6 s (4.85 h)** | **17,925.5 s (4.98 h)** |
+| Peak allocated GPU memory | 1,896 MB | 1,894 MB |
 
 The protocol runtime benchmark (section 7: batch 8, 20 warm-up batches, 3 timed passes over the test set) has not been run yet.
 
@@ -49,6 +60,7 @@ The protocol runtime benchmark (section 7: batch 8, 20 warm-up batches, 3 timed 
 - `model.py`: Faster R-CNN ResNet50-FPN V2 with the protocol settings and frozen backbone BatchNorm
 - `dataset.py`: YOLO-label dataset, 640x640 letterbox, flip augmentation, distorted evaluation copies
 - `evaluate.py`: prediction export in original-image pixels and COCO metrics (AP50, AP50:95, AP75, AP-small, AR@300)
+- `benchmark.py`: protocol runtime benchmark (section 7) on the test set
 - `requirements.txt`
 
 **Results (`results/`)**
@@ -57,6 +69,8 @@ The protocol runtime benchmark (section 7: batch 8, 20 warm-up batches, 3 timed 
 - `metrics.jsonl`: one line per epoch: losses, LR, optimiser updates, AMP loss scale, training/validation time, peak GPU memory, val AP50, AP50:95, AP75, AP-small, AR-small, AR@300
 - `final_metrics.json`: best epoch, total run time and final metrics for every split
 - `config.json`: full run configuration, model settings and library versions
+
+**Non-protocol variant (`results_robust/`)**: the same files for M3-robust.
 
 Checkpoints (`best.pt`, `last.pt`, `epochNNN.pt`) are not included because of their size.
 
@@ -72,6 +86,7 @@ pip install -r requirements.txt
 
 1. `python train.py --data <root> --out <run folder>`: trains for 100 epochs, validating every epoch, then exports `preds_{val,test}[_distorted].csv`, `final_metrics.json` and `DONE` from `best.pt`. On Colab, put `--out` on Google Drive.
 2. Re-running the same command resumes from `last.pt` (model, optimiser, AMP scaler, schedule position, best score and history); a finished run (`DONE` present) is not retrained.
+3. `python benchmark.py --data <root> --ckpt <run folder>/best.pt --out <run folder>/preds_test_timing.json`: protocol runtime benchmark on a T4. Test images are preloaded in RAM; batch 8, FP16 autocast, eval and inference mode; 20 warm-up batches, then 3 timed passes over the full test set with CUDA synchronised at every batch boundary. Timing covers letterbox preprocessing, host-to-device transfer, the forward pass (including RPN and RoI NMS), coordinate restoration and the device-to-host copy. Reports aggregate throughput, mean and P95 batch time (full batches only), amortised ms/image and peak allocated GPU memory.
 
 `--epochs` and `--limit N` (first N images per split) exist for smoke tests only. `--robust` trains a separate **non-protocol** variant with colour jitter, blur, noise and JPEG augmentation; write it to a different `--out`.
 
@@ -81,6 +96,7 @@ PyTorch, torchvision (Faster R-CNN ResNet50-FPN V2 and COCO weights), NumPy, Pil
 
 ## Implementation notes
 
+- `results_robust/preds_test.csv` has no rows for `beach_bird_1885`, a test image with no birds on which M3-robust produced no detections at all.
 - Validation AP50 peaked at epoch 7 and no later epoch beat it. Per the protocol, the selected checkpoint is used regardless.
 - AR@300 and the AP-small/AR-small values are read from COCOeval's arrays with a 300-detection cap, because `COCOeval.summarize()` hard-codes 100.
 - Checkpoints are written atomically from a background thread, so Drive I/O does not stall training.
