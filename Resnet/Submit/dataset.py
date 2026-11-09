@@ -1,18 +1,19 @@
+import io
 import os
 import random
 
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter
 from torch.utils.data import DataLoader, Dataset
 
 
 def seed_worker(worker_id):
-    """Ensures deterministic behavior across DataLoader workers."""
-    worker_seed = 42 + worker_id
+    """Deterministic per-worker seeds derived from the loader generator, so they change every epoch
+    (a fixed 42 + worker_id would replay the same flip sequence each epoch)."""
+    worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
-    torch.manual_seed(worker_seed)
 
 
 class BeachBirdDataset(Dataset):
@@ -23,6 +24,7 @@ class BeachBirdDataset(Dataset):
         transform=None,
         target_size=640,
         pad_color=(114, 114, 114),
+        corrupt=False,
     ):
         """
         Args:
@@ -37,6 +39,7 @@ class BeachBirdDataset(Dataset):
         self.transform = transform
         self.target_size = target_size
         self.pad_color = pad_color
+        self.corrupt = corrupt  # evaluation only: fixed, seeded distortion per image
 
         # Get all valid image filenames (sorted for determinism)
         valid_extensions = (".jpg", ".jpeg", ".png")
@@ -55,6 +58,8 @@ class BeachBirdDataset(Dataset):
         # Load image
         image = Image.open(img_path).convert("RGB")
         orig_width, orig_height = image.size
+        if self.corrupt:
+            image = corrupt_image(image, idx)
 
         # Aspect-preserving resize and padding to target_size x target_size
         image, scale, pad_w, pad_h = self._resize_and_pad(image)
@@ -118,12 +123,12 @@ class BeachBirdDataset(Dataset):
             if len(labels) > 0
             else torch.zeros((0,), dtype=torch.int64),
             "image_id": torch.tensor([idx], dtype=torch.int64),
+            # letterbox params to map predictions back to original-image pixels
+            "meta": torch.tensor([scale, pad_w, pad_h, orig_width, orig_height], dtype=torch.float64),
         }
 
-        # Convert PIL image to Tensor [C, H, W] normalized to [0, 1]
-        image_tensor = torch.tensor(np.array(image, dtype=np.float32) / 255.0).permute(
-            2, 0, 1
-        )
+        # uint8 [C, H, W]; converted to float [0, 1] on the GPU (4x less host-to-device traffic)
+        image_tensor = torch.from_numpy(np.asarray(image, dtype=np.uint8).copy()).permute(2, 0, 1)
 
         return image_tensor, target
 
@@ -166,46 +171,87 @@ class HorizontalFlipTransform:
         return image, boxes
 
 
+def _blur(image, radius):
+    return image.filter(ImageFilter.GaussianBlur(radius))
+
+
+def _noise(image, sigma, rng):
+    a = np.asarray(image, dtype=np.float32)
+    return Image.fromarray(np.clip(a + rng.normal(0, sigma, a.shape), 0, 255).astype(np.uint8))
+
+
+def _jpeg(image, quality):
+    buf = io.BytesIO()
+    image.save(buf, "JPEG", quality=quality)
+    buf.seek(0)
+    return Image.open(buf).convert("RGB")
+
+
+class PhotometricDistort:
+    """--robust run only (non-protocol): random colour jitter, blur, sensor noise and JPEG artefacts.
+    Pixel-only, so boxes are unchanged. Uses the per-worker seeded `random`, so runs stay reproducible."""
+
+    def __init__(self, p=0.25):
+        self.p = p
+
+    def __call__(self, image, boxes):
+        if random.random() < 0.8:
+            for enhance in random.sample([ImageEnhance.Brightness, ImageEnhance.Contrast, ImageEnhance.Color], 3):
+                image = enhance(image).enhance(random.uniform(0.6, 1.4))
+        if random.random() < self.p:
+            image = _blur(image, random.uniform(0.5, 2.0))
+        if random.random() < self.p:
+            image = _noise(image, random.uniform(3, 15), np.random.default_rng(random.getrandbits(32)))
+        if random.random() < self.p:
+            image = _jpeg(image, random.randint(20, 70))
+        return image, boxes
+
+
+class Compose:
+    def __init__(self, *transforms):
+        self.transforms = transforms
+
+    def __call__(self, image, boxes):
+        for t in self.transforms:
+            image, boxes = t(image, boxes)
+        return image, boxes
+
+
+CORRUPTIONS = ("blur", "noise", "jpeg", "dark", "low_contrast")
+
+
+def corrupt_image(image, idx):
+    """Fixed distorted copy for robustness evaluation: image idx always gets the same corruption
+    (cycling through CORRUPTIONS) at a fixed moderate severity, applied to the original image."""
+    rng = np.random.default_rng(10_000 + idx)
+    kind = CORRUPTIONS[idx % len(CORRUPTIONS)]
+    if kind == "blur":
+        return _blur(image, 1.5)
+    if kind == "noise":
+        return _noise(image, 12, rng)
+    if kind == "jpeg":
+        return _jpeg(image, 25)
+    if kind == "dark":
+        return ImageEnhance.Brightness(image).enhance(0.45)
+    return ImageEnhance.Contrast(image).enhance(0.45)
+
+
 def collate_fn(batch):
     """Custom collate function for object detection batching."""
     return tuple(zip(*batch))
 
 
-def get_dataloaders(train_dir, train_anns, val_dir, val_anns, batch_size=2):
-    """
-    Constructs train and validation DataLoaders adhering to the fixed training protocol (Seed 42, 2 workers).
-    """
-    random.seed(42)
-
-    train_transform = HorizontalFlipTransform(p=0.5)
-    val_transform = None  # No augmentations for validation
-
-    train_dataset = BeachBirdDataset(train_dir, train_anns, transform=train_transform)
-    val_dataset = BeachBirdDataset(val_dir, val_anns, transform=val_transform)
-
-    g = torch.Generator()
-    g.manual_seed(42)
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=2,
-        worker_init_fn=seed_worker,
-        generator=g,
-        collate_fn=collate_fn,
-        drop_last=False,
-    )
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=2,
-        worker_init_fn=seed_worker,
-        generator=g,
-        collate_fn=collate_fn,
-        drop_last=False,
-    )
-
-    return train_loader, val_loader
+def make_loader(root, split, batch_size, train=False, generator=None, robust=False, corrupt=False):
+    """Loader for <root>/images/<split> + <root>/labels/<split>. Protocol: 2 workers, no dropped batches,
+    train shuffled with a seeded generator and horizontal flip 0.5; val/test unaugmented.
+    robust=True adds PhotometricDistort to training; corrupt=True gives the fixed distorted eval copy."""
+    transform = None
+    if train:
+        flip = HorizontalFlipTransform(p=0.5)
+        transform = Compose(flip, PhotometricDistort()) if robust else flip
+    dataset = BeachBirdDataset(
+        os.path.join(root, "images", split), os.path.join(root, "labels", split),
+        transform=transform, corrupt=corrupt)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=train, num_workers=2,
+                      worker_init_fn=seed_worker, generator=generator, collate_fn=collate_fn,
+                      drop_last=False, pin_memory=torch.cuda.is_available())

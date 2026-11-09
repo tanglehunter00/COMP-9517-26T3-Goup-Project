@@ -3,66 +3,101 @@ import torch
 import torchvision
 
 
-def evaluate_model(model, data_loader, device, score_thresh=0.001, nms_iou=0.6):
-    """
-    Evaluates the model on the validation/test set according to the COMP9517 protocol.
-    """
+import contextlib
+import csv
+import io
+import os
+
+from PIL import Image
+
+
+@torch.inference_mode()
+def predict(model, data_loader, device):
+    """Detections for every image, mapped from the 640 letterbox canvas back to original-image pixels.
+    The model already applies the protocol post-processing (score >= 0.001, one greedy NMS at IoU 0.6,
+    max 300 per image), so no second suppression is run here."""
     model.eval()
-    cpu_device = torch.device("cpu")
-    results = []
-
-    # Ground truth annotations in COCO format for pycocotools
-    # (Assuming data_loader provides coco-style annotations or we format predictions accordingly)
-
-    with torch.no_grad():
-        for images, targets in data_loader:
-            images = list(img.to(device) for img in images)
+    dataset = data_loader.dataset
+    rows = []
+    for images, targets in data_loader:
+        images = [img.to(device, non_blocking=True).float().div_(255) for img in images]
+        with torch.autocast(device.type, dtype=torch.float16, enabled=device.type == "cuda"):
             outputs = model(images)
+        for output, target in zip(outputs, targets):
+            scale, pad_w, pad_h, width, height = target["meta"].tolist()
+            idx = int(target["image_id"])
+            boxes = output["boxes"].float().cpu()
+            boxes[:, [0, 2]] = ((boxes[:, [0, 2]] - pad_w) / scale).clamp(0, width)
+            boxes[:, [1, 3]] = ((boxes[:, [1, 3]] - pad_h) / scale).clamp(0, height)
+            for (x1, y1, x2, y2), score in zip(boxes.tolist(), output["scores"].float().cpu().tolist()):
+                rows.append({"idx": idx, "image_id": os.path.splitext(dataset.image_files[idx])[0],
+                             "category_id": 0, "x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1,
+                             "score": score})
+    return rows
 
-            for i, output in enumerate(outputs):
-                image_id = targets[i]["image_id"].item()
 
-                boxes = output["boxes"].to(cpu_device)
-                scores = output["scores"].to(cpu_device)
-                labels = output["labels"].to(cpu_device)
+def write_csv(path, rows):
+    """Protocol export format: image_id (file stem), category_id (0 = bird), x, y, width, height, score."""
+    fields = ["image_id", "category_id", "x", "y", "width", "height", "score"]
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
 
-                # Filter by score prefilter (0.001 for COCO metrics)
-                keep_prefilter = scores >= score_thresh
-                boxes = boxes[keep_prefilter]
-                scores = scores[keep_prefilter]
-                labels = labels[keep_prefilter]
 
-                # Apply greedy hard NMS with IoU 0.6 to final candidates
-                if len(boxes) > 0:
-                    keep_nms = torchvision.ops.nms(boxes, scores, nms_iou)
-                    boxes = boxes[keep_nms]
-                    scores = scores[keep_nms]
-                    labels = labels[keep_nms]
+def coco_ground_truth(dataset):
+    """COCO-format ground truth in original-image pixels, read straight from the YOLO label files."""
+    images, annotations = [], []
+    for idx, name in enumerate(dataset.image_files):
+        with Image.open(os.path.join(dataset.img_dir, name)) as im:
+            width, height = im.size
+        images.append({"id": idx, "width": width, "height": height, "file_name": name})
+        label_path = os.path.join(dataset.label_dir, os.path.splitext(name)[0] + ".txt")
+        if not os.path.exists(label_path):
+            continue
+        with open(label_path) as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 5:
+                    continue
+                xc, yc, w, h = (float(v) for v in parts[1:5])
+                x1, y1 = max(0.0, (xc - w / 2) * width), max(0.0, (yc - h / 2) * height)
+                x2, y2 = min(width, (xc + w / 2) * width), min(height, (yc + h / 2) * height)
+                if x2 > x1 and y2 > y1:
+                    annotations.append({"id": len(annotations) + 1, "image_id": idx, "category_id": 1,
+                                        "bbox": [x1, y1, x2 - x1, y2 - y1], "area": (x2 - x1) * (y2 - y1),
+                                        "iscrowd": 0})
+    return {"images": images, "annotations": annotations, "categories": [{"id": 1, "name": "bird"}]}
 
-                # Enforce 300 detection cap per image
-                if len(boxes) > 300:
-                    topk_indices = scores.argsort(descending=True)[:300]
-                    boxes = boxes[topk_indices]
-                    scores = scores[topk_indices]
-                    labels = labels[topk_indices]
 
-                # Format predictions for COCO evaluation
-                for box, score, label in zip(boxes, scores, labels):
-                    x1, y1, x2, y2 = box.tolist()
-                    w = x2 - x1
-                    h = y2 - y1
-                    # Convert back to original image coordinates if needed,
-                    # or keep in 640x640 canvas coordinates matching ground truth.
-                    results.append(
-                        {
-                            "image_id": int(image_id),
-                            "category_id": int(label),
-                            "bbox": [x1, y1, w, h],
-                            "score": float(score),
-                        }
-                    )
+def coco_metrics(dataset, rows, gt=None):
+    """AP50, AP50:95, AP75, AP-small and AR@300 with maxDets [1, 10, 300]. Reads the 300-cap arrays
+    directly because COCOeval.summarize() hard-codes a 100 cap."""
+    from pycocotools.coco import COCO
+    from pycocotools.cocoeval import COCOeval
 
-    return results
+    keys = ["AP50", "AP50:95", "AP75", "AP_small", "AR300", "AR_small"]
+    if not rows:
+        return dict.fromkeys(keys, 0.0)
+    with contextlib.redirect_stdout(io.StringIO()):
+        coco_gt = COCO()
+        coco_gt.dataset = gt or coco_ground_truth(dataset)
+        coco_gt.createIndex()
+        coco_dt = coco_gt.loadRes([{"image_id": r["idx"], "category_id": 1, "score": r["score"],
+                                    "bbox": [r["x"], r["y"], r["width"], r["height"]]} for r in rows])
+        ev = COCOeval(coco_gt, coco_dt, "bbox")
+        ev.params.maxDets = [1, 10, 300]
+        ev.evaluate()
+        ev.accumulate()
+    precision, recall = ev.eval["precision"], ev.eval["recall"]  # [T,R,K,A,M], [T,K,A,M]
+
+    def mean(x):
+        x = x[x > -1]
+        return float(x.mean()) if x.size else None  # None = N/A (e.g. no small objects)
+
+    return {"AP50": mean(precision[0, :, 0, 0, 2]), "AP50:95": mean(precision[:, :, 0, 0, 2]),
+            "AP75": mean(precision[5, :, 0, 0, 2]), "AP_small": mean(precision[:, :, 0, 1, 2]),
+            "AR300": mean(recall[:, 0, 0, 2]), "AR_small": mean(recall[:, 0, 1, 2])}
 
 
 def compute_operating_point_metrics(

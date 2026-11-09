@@ -1,145 +1,232 @@
+"""M3: Faster R-CNN ResNet50-FPN V2, trained exactly per the COMP9517 protocol (sections 3 and 5).
 
+Self-resuming: re-running with the same --out continues from last.pt (model, optimizer, AMP scaler,
+schedule position, best score, history). When all epochs are done it exports val/test predictions from
+best.pt in original-image coordinates (clean and distorted val/test) and writes DONE.
+Re-running a finished run does nothing.
 
-import os
-import time
+Overfitting control: best.pt is the epoch with the highest clean val AP50 (not the last epoch), and
+metrics.jsonl logs train loss next to val AP every epoch. --robust is a separate, non-protocol run.
+
+    python train.py --data "/content/data/Beach Bird Detection Dataset v1.0" --out /content/drive/MyDrive/comp9517/m3
+"""
+import argparse
+import json
 import math
+import os
+import platform
+import random
+import sys
+import time
+from pathlib import Path
+
+import numpy as np
 import torch
 import torchvision
-from torch.cuda.amp import autocast, GradScaler
-from dataset import get_dataloaders
-from model import get_faster_rcnn_model
 
-def adjust_learning_rate(optimizer, epoch, iteration, num_iterations_per_epoch, total_epochs, peak_lr, warm_up_epochs=1):
-    """
-    Implements linear warm-up from 10% of peak to peak, followed by cosine decay to 1% of peak.
-    Advanced by optimizer updates.
-    """
-    total_steps = total_epochs * num_iterations_per_epoch
-    current_step = epoch * num_iterations_per_epoch + iteration
-    warm_up_steps = warm_up_epochs * num_iterations_per_epoch
+from dataset import make_loader
+from evaluate import coco_ground_truth, coco_metrics, predict, write_csv
+from model import PROTOCOL_KWARGS, get_faster_rcnn_model
 
-    min_lr = peak_lr * 0.01
-    warm_up_start_lr = peak_lr * 0.1
+SEED, EPOCHS = 42, 100
+BATCH, ACCUM, VAL_BATCH = 2, 2, 8  # effective batch 4
+PEAK_LR, MOMENTUM, WEIGHT_DECAY, WARMUP_EPOCHS = 0.0025, 0.9, 0.0001, 1
 
-    if current_step < warm_up_steps:
-        # Linear warm-up
-        lr = warm_up_start_lr + (peak_lr - warm_up_start_lr) * (current_step / warm_up_steps)
+
+def lr_at(update, total, warmup):
+    """Linear warm-up from 10% of peak to peak, then cosine decay to 1% of peak at the final update.
+    Indexed by optimizer updates."""
+    if update < warmup:
+        return PEAK_LR * (0.1 + 0.9 * update / warmup)
+    progress = (update - warmup) / max(total - warmup - 1, 1)
+    return PEAK_LR * (0.01 + 0.99 * 0.5 * (1 + math.cos(math.pi * progress)))
+
+
+def seed_all(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def save_atomic(path, obj):
+    """Write-then-rename, so a disconnect mid-save never corrupts the previous checkpoint."""
+    tmp = Path(str(path) + ".tmp")
+    if isinstance(obj, str):
+        tmp.write_text(obj)
     else:
-        # Cosine decay
-        progress = (current_step - warm_up_steps) / (total_steps - warm_up_steps)
-        lr = min_lr + 0.5 * (peak_lr - min_lr) * (1 + math.cos(math.pi * progress))
+        torch.save(obj, tmp)
+    os.replace(tmp, path)
 
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
-    return lr
 
-def train_model():
-    # Configuration
-    train_dir = "/content/data/Beach Bird Detection Dataset v1.0/images/train"
-    train_anns = "/content/data/Beach Bird Detection Dataset v1.0/labels/train"
-    val_dir = "/content/data/Beach Bird Detection Dataset v1.0/images/val"
-    val_anns = "/content/data/Beach Bird Detection Dataset v1.0/labels/val"
-    weights_path = "/content/COMP-9517-26T3-Goup-Project/Resnet/fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth"
-    output_dir = "./checkpoints_m3"
-    os.makedirs(output_dir, exist_ok=True)
+def sync(device):
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
 
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--data", required=True, help="dataset root with images/{train,val,test} and labels/{...}")
+    p.add_argument("--out", required=True, help="run folder (Google Drive on Colab); re-run to resume")
+    p.add_argument("--epochs", type=int, default=EPOCHS, help="smoke tests only; the protocol is 100")
+    p.add_argument("--limit", type=int, help="smoke tests only: first N images per split")
+    p.add_argument("--robust", action="store_true",
+                   help="NON-PROTOCOL variant: add colour jitter, blur, noise and JPEG distortion to training")
+    a = p.parse_args()
+
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    if (out / "DONE").exists():
+        print("Run already complete:", (out / "DONE").read_text())
+        return
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    if device.type != "cuda" and a.epochs == EPOCHS:
+        raise SystemExit("The protocol run needs a CUDA GPU (Colab T4). Use --epochs/--limit for CPU smoke tests.")
 
-    # Data loaders (batch_size=8 as per M3 spec)
-    train_loader, val_loader = get_dataloaders(train_dir, train_anns, val_dir, val_anns, batch_size=8)
+    seed_all(SEED)
+    # Inputs are always 640x640, so cuDNN autotuning picks the fastest conv kernels once and reuses them.
+    torch.backends.cudnn.benchmark = True
 
-    # Initialize model
-    model = get_faster_rcnn_model(weights_path=weights_path, num_classes=2)
-    model.to(device)
+    def loader(split, batch, train=False, generator=None, corrupt=False):
+        dl = make_loader(a.data, split, batch, train=train, generator=generator, robust=a.robust, corrupt=corrupt)
+        if a.limit:
+            dl.dataset.image_files = dl.dataset.image_files[:a.limit]
+        return dl
 
-    # Optimizer: SGD (momentum 0.9, weight decay 0.0001, Nesterov off)
-    # Filter parameters requiring gradients
-    params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.SGD(params, lr=0.0025, momentum=0.9, nesterov=False, weight_decay=0.0001)
+    generator = torch.Generator()
+    train_loader, val_loader = loader("train", BATCH, True, generator), loader("val", VAL_BATCH)
+    val_gt = coco_ground_truth(val_loader.dataset)
+    n_train = len(train_loader.dataset)
+    batches = math.ceil(n_train / BATCH)
+    updates_per_epoch = math.ceil(batches / ACCUM)
+    total, warmup = a.epochs * updates_per_epoch, WARMUP_EPOCHS * updates_per_epoch
 
-    # AMP Scaler
-    scaler = GradScaler()
+    model = get_faster_rcnn_model(pretrained=True).to(device)
+    params = [q for q in model.parameters() if q.requires_grad]
+    optimizer = torch.optim.SGD(params, lr=lr_at(0, total, warmup), momentum=MOMENTUM, nesterov=False,
+                                weight_decay=WEIGHT_DECAY)
+    scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
 
-    num_epochs = 100
-    accumulation_steps = 2
-    peak_lr = 0.0025
-    best_ap50 = 0.0
-    best_ap50_95 = 0.0
+    start, updates, best, history = 0, 0, (-1.0, -1.0), []
+    last = out / "last.pt"
+    if last.exists():
+        ck = torch.load(last, map_location="cpu", weights_only=False)
+        if (ck["epochs"], ck["n_train"], ck.get("robust", False)) != (a.epochs, n_train, a.robust):
+            raise SystemExit(f"{last} is from a different run configuration; use a new --out")
+        model.load_state_dict(ck["model"])
+        optimizer.load_state_dict(ck["optimizer"])
+        scaler.load_state_dict(ck["scaler"])
+        start, updates, best, history = ck["epoch"], ck["updates"], tuple(ck["best"]), ck["history"]
+        print(f"Resumed after epoch {start}/{a.epochs} ({updates} updates, best AP50/AP50:95 {best})", flush=True)
 
-    print("Starting M3 Training...")
+    gpu = torch.cuda.get_device_name(device) if device.type == "cuda" else platform.processor()
+    config = dict(
+        method="M3-robust (NON-PROTOCOL: distortion augmentation)" if a.robust
+        else "M3 Faster R-CNN ResNet50-FPN V2", protocol=not a.robust, seed=SEED, epochs=a.epochs, limit=a.limit, data=a.data,
+        train_images=n_train, train_batch=BATCH, accumulation=ACCUM, effective_batch=BATCH * ACCUM,
+        validation_batch=VAL_BATCH, optimizer="SGD", peak_lr=PEAK_LR, final_lr=PEAK_LR * 0.01,
+        momentum=MOMENTUM, nesterov=False, weight_decay=WEIGHT_DECAY, warmup_epochs=WARMUP_EPOCHS,
+        updates_per_epoch=updates_per_epoch, total_updates=total, warmup_updates=warmup,
+        precision="AMP FP16" if device.type == "cuda" else "FP32", augmentation="horizontal flip 0.5" + (
+            "; p0.8 brightness/contrast/saturation x[0.6,1.4]; p0.25 each: gaussian blur r[0.5,2],"
+            " gaussian noise sd[3,15], JPEG q[20,70]" if a.robust else ""),
+        trainable_backbone_layers=3, frozen_backbone_batchnorm=True, weights="COCO_V1 (dd69338a)",
+        model_kwargs=PROTOCOL_KWARGS, trainable_params=sum(q.numel() for q in params),
+        device=gpu, torch=torch.__version__, torchvision=torchvision.__version__, python=platform.python_version(),
+        nondeterminism="cudnn.benchmark=True; RoIAlign/scatter backward on CUDA are nondeterministic",
+    )
+    save_atomic(out / "config.json", json.dumps(config, indent=2))
+    save_atomic(out / "model.txt", str(model))
 
-    for epoch in range(num_epochs):
+    run_start = time.perf_counter()
+    for epoch in range(start, a.epochs):
+        # Per-epoch seeds: an interrupted epoch replays identically on resume.
+        seed_all(SEED + epoch)
+        generator.manual_seed(SEED + epoch)
         model.train()
-        epoch_start_time = time.time()
-        running_loss = 0.0
-        optimizer.zero_grad()
-
-        num_batches = len(train_loader)
-
+        if device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(device)
+        sync(device)
+        t0 = time.perf_counter()
+        loss_sums, seen = {}, 0
         for i, (images, targets) in enumerate(train_loader):
-            images = list(image.to(device) for image in images)
-            targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-
-            # Forward pass with AMP FP16
-            with autocast():
+            images = [im.to(device, non_blocking=True).float().div_(255) for im in images]
+            targets = [{"boxes": t["boxes"].to(device, non_blocking=True),
+                        "labels": t["labels"].to(device, non_blocking=True)} for t in targets]
+            # Images in this accumulation group (the last group of an epoch may be partial).
+            group_images = min(BATCH * ACCUM, n_train - (i // ACCUM) * BATCH * ACCUM)
+            with torch.autocast(device.type, dtype=torch.float16, enabled=device.type == "cuda"):
                 loss_dict = model(images, targets)
-                losses = sum(loss for loss in loss_dict.values())
-                # Normalize loss by accumulation steps
-                losses = losses / accumulation_steps
-
-            # Backward pass
-            scaler.scale(losses).backward()
-
-            running_loss += losses.item() * accumulation_steps
-
-            # Gradient accumulation step
-            if (i + 1) % accumulation_steps == 0 or (i + 1) == num_batches:
-                scaler.step(optimizer)
+            loss = sum(loss_dict.values())
+            # torchvision losses are per-batch means; weighting by batch/group size makes each update the
+            # mean over the images actually accumulated, including the partial tail group.
+            scaler.scale(loss * len(images) / group_images).backward()
+            for k, v in loss_dict.items():
+                loss_sums[k] = loss_sums.get(k, 0.0) + v.detach() * len(images)
+            seen += len(images)
+            if i % ACCUM == ACCUM - 1 or i == len(train_loader) - 1:
+                lr = lr_at(updates, total, warmup)
+                for group in optimizer.param_groups:
+                    group["lr"] = lr
+                scaler.step(optimizer)  # skips the step (and lowers the scale) if FP16 grads overflowed
                 scaler.update()
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
+                updates += 1
+        losses = {k: float(v) / seen for k, v in loss_sums.items()}
+        if not all(math.isfinite(v) for v in losses.values()):
+            raise RuntimeError(f"Non-finite training loss in epoch {epoch + 1}: {losses}")
+        sync(device)
+        train_s = time.perf_counter() - t0
+        peak_mb = torch.cuda.max_memory_allocated(device) / 2**20 if device.type == "cuda" else 0.0
 
-                # Adjust learning rate per optimizer update
-                current_lr = adjust_learning_rate(optimizer, epoch, i, num_batches, num_epochs, peak_lr, warm_up_epochs=1)
+        t0 = time.perf_counter()
+        metrics = coco_metrics(val_loader.dataset, predict(model, val_loader, device), gt=val_gt)
+        sync(device)
+        val_s = time.perf_counter() - t0
 
-        epoch_duration = time.time() - epoch_start_time
-        avg_train_loss = running_loss / num_batches
-        peak_gpu_mem = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+        # best: highest val AP50, ties by AP50:95, then the earlier epoch (strict >).
+        key = (metrics["AP50"] or 0.0, metrics["AP50:95"] or 0.0)
+        improved = key > best
+        best = max(best, key)
+        state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+        log = dict(epoch=epoch + 1, loss=sum(losses.values()), **losses, lr=lr, updates=updates,
+                   loss_scale=scaler.get_scale(), train_s=round(train_s, 1), val_s=round(val_s, 1),
+                   peak_gpu_mb=round(peak_mb), **metrics, best=improved)
+        history.append(log)
 
-        print(f"Epoch [{epoch+1}/{num_epochs}] | Loss: {avg_train_loss:.4f} | Time: {epoch_duration:.2f}s | GPU Mem: {peak_gpu_mem:.2f}MB")
-
-        # Validation step every epoch
-        model.eval()
-        # TODO: Run evaluation on val_loader using COCO evaluator to compute AP50, AP50:95, AP75, recall, etc.
-        # placeholder evaluation results for checkpoint saving logic:
-        val_ap50 = 0.0  # Replace with actual evaluator output
-        val_ap50_95 = 0.0
-
-        # Checkpoint saving rules:
-        # - Save last after every epoch
-        # - Archive every 10 epochs
-        # - Save best using validation AP50 (tie-break AP50:95, then earlier epoch)
-        checkpoint = {
-            'epoch': epoch + 1,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'scaler_state_dict': scaler.state_dict(),
-        }
-
-        last_path = os.path.join(output_dir, "checkpoint_last.pth")
-        torch.save(checkpoint, last_path)
-
+        # Order matters for crash safety: best/archive first, last.pt (the resume point) after.
+        if improved:
+            save_atomic(out / "best.pt", dict(model=state, epoch=epoch + 1, metrics=metrics))
         if (epoch + 1) % 10 == 0:
-          archived_path = os.path.join(output_dir, f"checkpoint_epoch_{epoch+1}.pth")
-        torch.save(checkpoint, archived_path)
+            save_atomic(out / f"epoch{epoch + 1:03d}.pt", dict(model=state, epoch=epoch + 1, metrics=metrics))
+        save_atomic(last, dict(model=state, optimizer=optimizer.state_dict(), scaler=scaler.state_dict(),
+                               epoch=epoch + 1, epochs=a.epochs, n_train=n_train, robust=a.robust, updates=updates,
+                               best=best, history=history))
+        save_atomic(out / "metrics.jsonl", "".join(json.dumps(h) + "\n" for h in history))
+        print(json.dumps(log), flush=True)
 
-        # Update best model based on AP50 and tie-breakers
-        if val_ap50 > best_ap50 or (val_ap50 == best_ap50 and val_ap50_95 > best_ap50_95):
-            best_ap50 = val_ap50
-            best_ap50_95 = val_ap50_95
-            best_path = os.path.join(output_dir, "checkpoint_best.pth")
-            torch.save(checkpoint, best_path)
-            print(f"--> Saved new best checkpoint at epoch {epoch+1} with AP50: {val_ap50:.4f}")
+    # Protocol: test only after all training is complete, using the selected best checkpoint.
+    best_ck = torch.load(out / "best.pt", map_location="cpu", weights_only=False)
+    model.load_state_dict(best_ck["model"])
+    final = {"best_epoch": best_ck["epoch"], "train_wall_s": round(time.perf_counter() - run_start, 1)}
+    # Clean splits are the protocol results; *_distorted are fixed seeded corruptions (blur, noise, JPEG,
+    # dark, low contrast) of the same images, scored identically, to compare robustness across runs.
+    for split in ("val", "test"):
+        for corrupt in (False, True):
+            name = split + ("_distorted" if corrupt else "")
+            dl = loader(split, VAL_BATCH, corrupt=corrupt)
+            rows = predict(model, dl, device)
+            write_csv(out / f"preds_{name}.csv", rows)
+            final[name] = coco_metrics(dl.dataset, rows)
+    save_atomic(out / "final_metrics.json", json.dumps(final, indent=2))
+    save_atomic(out / "DONE", json.dumps(final))
+    print("DONE", json.dumps(final), flush=True)
+
 
 if __name__ == "__main__":
-    train_model()
+    main()
+    # All outputs are already written atomically and closed. Exit hard so a DataLoader worker or
+    # multiprocessing helper stuck in interpreter teardown can't block the notebook cell forever.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)

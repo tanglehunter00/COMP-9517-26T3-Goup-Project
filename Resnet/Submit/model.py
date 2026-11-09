@@ -1,50 +1,45 @@
 import torch
-import torchvision
+from torch import nn
+from torchvision.models.detection import FasterRCNN_ResNet50_FPN_V2_Weights, fasterrcnn_resnet50_fpn_v2
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+from torchvision.ops import FrozenBatchNorm2d
 
-def get_faster_rcnn_model(weights_path=None, num_classes=2):
-    """
-    Builds and configures Faster R-CNN ResNet50-FPN V2 according to the fixed protocol:
-    - RPN pre/post-NMS limits: 2000/1000 (train), 1000/1000 (eval)
-    - RPN NMS IoU: 0.7
-    - RoI sampling: 512 proposals, positive fraction 0.25
-    - RoI output NMS: 0.6
-    """
-    # Initialize with keyword arguments for RPN and RoI settings
-    model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(
-        weights=None,
-        rpn_pre_nms_top_n_train=2000,
-        rpn_pre_nms_top_n_test=1000,
-        rpn_post_nms_top_n_train=1000,
-        rpn_post_nms_top_n_test=1000,
-        rpn_nms_thresh=0.7,
-        box_batch_size_per_image=512,
-        box_positive_fraction=0.25,
-        box_nms_thresh=0.6
-    )
+# Protocol section 3 (M3) and section 6. Everything else stays at the pinned torchvision defaults.
+PROTOCOL_KWARGS = dict(
+    min_size=640, max_size=640,  # inputs are already 640x640 letterbox canvases: no internal rescale (default 800)
+    rpn_pre_nms_top_n_train=2000, rpn_post_nms_top_n_train=1000,
+    rpn_pre_nms_top_n_test=1000, rpn_post_nms_top_n_test=1000,
+    rpn_nms_thresh=0.7,
+    box_batch_size_per_image=512, box_positive_fraction=0.25,
+    box_score_thresh=0.001,      # score prefilter (default 0.05 truncates the PR curve and lowers AP)
+    box_nms_thresh=0.6,          # the single greedy hard NMS on final candidates
+    box_detections_per_img=300,  # 300-detection cap (default 100)
+)
 
-    # Load official COCO checkpoint weights if provided
-    if weights_path:
-        print(f"Loading checkpoint weights from {weights_path}...")
-        state_dict = torch.load(weights_path, map_location="cpu")
-        model.load_state_dict(state_dict, strict=False)
 
-    # Configure trainable backbone layers = 3 (freeze stem, layer1, and layer2)
-    for name, parameter in model.backbone.named_parameters():
-        if any(prefix in name for prefix in ["conv1", "bn1", "body.layer1", "body.layer2"]):
-            parameter.requires_grad = False
+def freeze_batchnorm(module):
+    """Replace BatchNorm2d with FrozenBatchNorm2d: model.train() can then no longer update the running
+    statistics, and the affine parameters stop being parameters at all."""
+    for name, child in module.named_children():
+        if isinstance(child, nn.BatchNorm2d):
+            frozen = FrozenBatchNorm2d(child.num_features, eps=child.eps)
+            with torch.no_grad():
+                for key in ("weight", "bias", "running_mean", "running_var"):
+                    getattr(frozen, key).copy_(getattr(child, key))
+            setattr(module, name, frozen)
+        else:
+            freeze_batchnorm(child)
 
-    # Freeze backbone BatchNorm running stats and affine parameters explicitly
-    def set_bn_eval_and_freeze(module):
-        if isinstance(module, torch.nn.BatchNorm2d):
-            module.eval()
-            for param in module.parameters():
-                param.requires_grad = False
 
-    model.backbone.apply(set_bn_eval_and_freeze)
-
-    # Replace the box predictor head for 2 classes (0: background, 1: bird)
+def get_faster_rcnn_model(num_classes=2, pretrained=True):
+    """Faster R-CNN ResNet50-FPN V2 from the official COCO weights
+    (fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth, downloaded and hash-checked by torchvision).
+    trainable_backbone_layers=3 (layer2-4 train; stem + layer1 frozen), ResNet BatchNorm frozen,
+    predictor replaced with background + bird."""
+    model = fasterrcnn_resnet50_fpn_v2(
+        weights=FasterRCNN_ResNet50_FPN_V2_Weights.COCO_V1 if pretrained else None,
+        trainable_backbone_layers=3, **PROTOCOL_KWARGS)
+    freeze_batchnorm(model.backbone.body)
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
-
     return model
