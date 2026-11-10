@@ -65,6 +65,44 @@ Setup: Tesla T4, batch 8, AMP FP16, 20 warm-up batches, then 3 timed passes over
 
 The benchmark keeps 9,124 (M3) and 8,148 (M3-robust) detections per pass, 7 and 4 more than the rows in `preds_test.csv`: FP16 kernel differences between Colab sessions move a few boxes across the 0.001 score threshold.
 
+## Figures
+
+All figures are drawn from the files in `results/` and `results_robust/` and the dataset's ground-truth labels. Matching is greedy one-to-one at IoU 0.5 in original-image pixels; the AP50 values it gives match the COCO numbers above.
+
+### Training curves
+
+![Training loss, validation AP50 and AP50:95 per epoch](figures/training_curves.png)
+
+Training loss falls steadily for all 100 epochs (M3 0.513 to 0.031), but validation accuracy peaks early: M3 reaches its best val AP50 at epoch 7 (AP50:95 0.480), then drifts down to AP50 0.843 / AP50:95 0.439 by epoch 100. The model overfits the 1,369 training images after the first few epochs, so selecting the checkpoint on validation AP50 matters more than the epoch budget. M3-robust's augmentation keeps its training loss about twice as high and slows the decline (epoch 100: AP50 0.857 / AP50:95 0.445), which is consistent with it acting as a regulariser.
+
+### Clean vs distorted test images
+
+![Test metrics on clean and distorted images](figures/clean_vs_distorted.png)
+
+On the distorted test copies (blur, noise, JPEG, darkening, low contrast), M3 loses 0.069 AP50 and 0.048 AP50:95. Small birds suffer most: AP-small drops by 0.074 and AR-small by 0.080. M3-robust roughly halves every drop (AP50 -0.028, AP50:95 -0.030, AR-small -0.043) and is also slightly better on clean images.
+
+### Precision-recall
+
+![Test precision-recall curves at IoU 0.5](figures/pr_curve_test.png)
+
+Precision stays at or above 0.9 up to 0.80 recall (M3) and 0.83 (M3-robust), then falls off sharply; the remaining birds are found only with very low-confidence boxes, and recall tops out at 0.95. The best F1 is 0.855 for M3 at score >= 0.58 (precision 0.876, recall 0.835) and 0.869 for M3-robust at score >= 0.61 (precision 0.892, recall 0.847). On distorted images M3 holds 0.9 precision only up to 0.68 recall (0.74 precision at 0.8 recall), while M3-robust keeps it up to 0.80 recall, close to its clean curve.
+
+### Recall by bird size
+
+![Recall by bird size](figures/recall_by_size.png)
+
+At each model's best-F1 threshold, recall rises from 0.33 for birds under 16 px (square root of box area, original pixels) to 0.61 at 16-24 px and 0.88 or more above 32 px. Tiny birds are the main source of misses. They are a small share of the 1,518 test birds, but 16-32 px birds make up a third of them. M3-robust improves the 16-24 px and 24-32 px bins (+0.07, +0.05) but not the smallest.
+
+### Example detections
+
+![M3 detections on four test images](figures/examples_test.png)
+
+M3 at its best-F1 threshold on four test images: the most crowded image, a median, the worst and a best case by per-image recall.
+- `beach_bird_1790`: a dense flock of small birds on water. 38 detections for 66 birds; many of the smallest birds score below the threshold.
+- `beach_bird_1888`: overlapping godwits. Recall is high, but overlapping birds also produce merged and duplicate boxes (16 detections for 9 birds), which cost precision.
+- `beach_bird_1667`: aerial view with long shadows. Every bird is detected, but the predicted boxes also take in part of the shadow while the labels are tight around the body, so most fall below IoU 0.5 and recall is 0.20. This is an annotation-convention mismatch more than a detection failure.
+- `beach_bird_1887`: well-separated birds in flight against a plain background. All 5 found with tight boxes.
+
 ## Files submitted
 
 **Code**
@@ -84,6 +122,8 @@ The benchmark keeps 9,124 (M3) and 8,148 (M3-robust) detections per pass, 7 and 
 - `preds_test_timing.json`: runtime benchmark (per-pass and aggregate timings, peak GPU memory, environment)
 
 **Non-protocol variant (`results_robust/`)**: the same files for M3-robust.
+
+**Figures (`figures/`)**: `training_curves.png`, `clean_vs_distorted.png`, `pr_curve_test.png`, `recall_by_size.png`, `examples_test.png` (see Figures above).
 
 Checkpoints (`best.pt`, `last.pt`, `epochNNN.pt`) are not included because of their size.
 
