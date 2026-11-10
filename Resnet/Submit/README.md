@@ -51,7 +51,19 @@ Hardware: Google Colab, NVIDIA Tesla T4. Python 3.13.16, torch 2.14.1+cu130, tor
 | **Total run (training + validation)** | **17,469.6 s (4.85 h)** | **17,925.5 s (4.98 h)** |
 | Peak allocated GPU memory | 1,896 MB | 1,894 MB |
 
-The protocol runtime benchmark (section 7: batch 8, 20 warm-up batches, 3 timed passes over the test set) has not been run yet.
+## Runtime benchmark (protocol section 7)
+
+Setup: Tesla T4, batch 8, AMP FP16, 20 warm-up batches, then 3 timed passes over the 240 test images (720 images), images preloaded in RAM. torch 2.14.1+cu130, torchvision 0.29.1+cu130.
+
+| Metric | M3 | M3-robust (non-protocol) |
+|---|---|---|
+| Throughput | 17.47 images/s | 16.75 images/s |
+| Amortised time per image | 57.25 ms | 59.69 ms |
+| Mean batch time | 457.99 ms | 477.54 ms |
+| P95 batch time (full batches only) | 500.55 ms | 528.22 ms |
+| Peak allocated GPU memory | 1,565 MB | 1,565 MB |
+
+The benchmark keeps 9,124 (M3) and 8,148 (M3-robust) detections per pass, 7 and 4 more than the rows in `preds_test.csv`: FP16 kernel differences between Colab sessions move a few boxes across the 0.001 score threshold.
 
 ## Files submitted
 
@@ -69,6 +81,7 @@ The protocol runtime benchmark (section 7: batch 8, 20 warm-up batches, 3 timed 
 - `metrics.jsonl`: one line per epoch: losses, LR, optimiser updates, AMP loss scale, training/validation time, peak GPU memory, val AP50, AP50:95, AP75, AP-small, AR-small, AR@300
 - `final_metrics.json`: best epoch, total run time and final metrics for every split
 - `config.json`: full run configuration, model settings and library versions
+- `preds_test_timing.json`: runtime benchmark (per-pass and aggregate timings, peak GPU memory, environment)
 
 **Non-protocol variant (`results_robust/`)**: the same files for M3-robust.
 

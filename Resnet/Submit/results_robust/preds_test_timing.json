@@ -1,0 +1,51 @@
+{
+ "method": "M3-robust (NON-PROTOCOL: distortion augmentation)",
+ "checkpoint": "/content/drive/MyDrive/comp9517/m3-robust/best.pt",
+ "checkpoint_epoch": 17,
+ "split": "test",
+ "n_images": 240,
+ "batch": 8,
+ "full_batches_per_repeat": 30,
+ "warmup_batches": 20,
+ "repeats": [
+  {
+   "total_s": 14.018,
+   "images_per_s": 17.12,
+   "ms_per_image": 58.41,
+   "mean_batch_ms": 467.25,
+   "p95_batch_ms": 514.12
+  },
+  {
+   "total_s": 14.358,
+   "images_per_s": 16.72,
+   "ms_per_image": 59.83,
+   "mean_batch_ms": 478.6,
+   "p95_batch_ms": 522.02
+  },
+  {
+   "total_s": 14.603,
+   "images_per_s": 16.44,
+   "ms_per_image": 60.84,
+   "mean_batch_ms": 486.76,
+   "p95_batch_ms": 536.88
+  }
+ ],
+ "aggregate": {
+  "images": 720,
+  "total_s": 42.979,
+  "images_per_s": 16.75,
+  "ms_per_image": 59.69,
+  "mean_batch_ms": 477.54,
+  "p95_batch_ms": 528.22
+ },
+ "peak_gpu_mb": 1565,
+ "detections_per_repeat": 8148,
+ "timed": "letterbox preprocessing, host-to-device transfer, forward pass incl. RPN/RoI NMS, coordinate restoration to original pixels, device-to-host copy; images preloaded in RAM",
+ "precision": "AMP FP16",
+ "inference_mode": true,
+ "cudnn_benchmark": true,
+ "device": "Tesla T4",
+ "torch": "2.14.1+cu130",
+ "torchvision": "0.29.1+cu130",
+ "python": "3.13.16"
+}
