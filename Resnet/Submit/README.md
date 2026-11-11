@@ -81,6 +81,31 @@ Training loss falls steadily for all 100 epochs (M3 0.513 to 0.031), but validat
 
 On the distorted test copies (blur, noise, JPEG, darkening, low contrast), M3 loses 0.069 AP50 and 0.048 AP50:95. Small birds suffer most: AP-small drops by 0.074 and AR-small by 0.080. M3-robust roughly halves every drop (AP50 -0.028, AP50:95 -0.030, AR-small -0.043) and is also slightly better on clean images.
 
+### Results by distortion type
+
+Each test image gets one fixed distortion, cycled by its sorted index (`CORRUPTIONS[idx % 5]` in `dataset.py`), so each type covers 48 images. AP50 is computed on that subset of images; recall is at IoU 0.5 and each model's best-F1 threshold (M3 0.58, M3-robust 0.61). "Clean" is the same 48 images undistorted, so each row compares like with like.
+
+| Distortion | Images | Birds | M3 AP50 clean | M3 AP50 distorted | M3 recall clean | M3 recall distorted | M3-robust AP50 clean | M3-robust AP50 distorted | M3-robust recall clean | M3-robust recall distorted |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Gaussian blur (r 1.5) | 48 | 346 | 0.899 | 0.786 | 0.838 | 0.685 | 0.908 | 0.849 | 0.844 | 0.763 |
+| Gaussian noise (sd 12) | 48 | 256 | 0.865 | 0.801 | 0.805 | 0.715 | 0.886 | 0.861 | 0.836 | 0.809 |
+| JPEG (quality 25) | 48 | 346 | 0.886 | 0.825 | 0.853 | 0.734 | 0.886 | 0.859 | 0.847 | 0.798 |
+| Dark (brightness x0.45) | 48 | 216 | 0.900 | 0.895 | 0.889 | 0.838 | 0.931 | 0.933 | 0.917 | 0.921 |
+| Low contrast (x0.45) | 48 | 354 | 0.873 | 0.793 | 0.802 | 0.658 | 0.884 | 0.864 | 0.808 | 0.754 |
+
+Blur hurts M3 most (AP50 -0.113, recall -0.153), followed by low contrast (AP50 -0.080, recall -0.144). Both remove the edge detail that separates small birds from sand and water. Darkening barely matters (AP50 -0.005): the birds keep their contrast against the background and only the overall brightness drops. M3-robust's AP50 drops are smaller for every type (blur -0.059, noise -0.025, JPEG -0.027, low contrast -0.020), and on dark images it shows no loss. Its training augmentation includes blur, noise, JPEG and brightness/contrast changes, so all five test distortions are close to conditions it saw during training.
+
+### Example detections on distorted images
+
+![M3 and M3-robust detections on one distorted test image per distortion type](figures/examples_distorted.jpg)
+
+One test image per distortion type (the median by bird count among images with 8 to 30 birds), shown as the model saw it. The top row is M3 and the bottom row is M3-robust, each at its best-F1 threshold.
+- **Blur** (`beach_bird_1671`): aerial view with long shadows. M3 recall falls to 0.23: on the blurred image its boxes stretch over each bird and its shadow, so they miss IoU 0.5 against the tight body labels (the same effect as `beach_bird_1667` below). M3-robust keeps tighter boxes and reaches 0.54.
+- **Noise** (`beach_bird_1692`): well-separated gulls on sand. Both models find 12 of 14 birds; the noise changes little here.
+- **JPEG** (`beach_bird_1703`): a packed group of sanderlings. Compression artefacts blur the boundaries between neighbouring birds and M3 finds 12 of 16 (recall 0.75); M3-robust finds 14 (0.88).
+- **Dark** (`beach_bird_1729`): overlapping curlews in water. M3 finds 9 of 11 birds and M3-robust 10; the remaining errors come from overlapping birds, not from the darkening.
+- **Low contrast** (`beach_bird_1775`): gulls against grey water and grass. M3 misses birds whose outline fades into the background (recall 0.74); M3-robust finds 17 of 19 (0.89).
+
 ### Precision-recall
 
 ![Test precision-recall curves at IoU 0.5](figures/pr_curve_test.png)
@@ -123,7 +148,7 @@ M3 at its best-F1 threshold on four test images: the most crowded image, a media
 
 **Non-protocol variant (`results_robust/`)**: the same files for M3-robust.
 
-**Figures (`figures/`)**: `training_curves.png`, `clean_vs_distorted.png`, `pr_curve_test.png`, `recall_by_size.png`, `examples_test.png` (see Figures above).
+**Figures (`figures/`)**: `training_curves.png`, `clean_vs_distorted.png`, `pr_curve_test.png`, `recall_by_size.png`, `examples_test.png`, `examples_distorted.jpg` (see Figures above).
 
 Checkpoints (`best.pt`, `last.pt`, `epochNNN.pt`) are not included because of their size.
 
