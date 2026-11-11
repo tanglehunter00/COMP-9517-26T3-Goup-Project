@@ -135,6 +135,10 @@ A swirl centred on a bird halves its recall (M3 0.923 to 0.466) and costs 0.25 A
 
 Other birds also lose recall, and still do at four bird-lengths (0.834 vs 0.873). In dense flocks a swirl placed one to two bird-lengths from its target can land on a neighbouring bird, so "other birds" are not untouched by the warp.
 
+![Swirls in a dense flock landing on neighbouring birds](figures/examples_warp_flock.jpg)
+
+`beach_bird_1781` (33 birds, 3 swirl targets), cropped to the swirls. It was picked as the test image with at least 8 birds that has the most non-target birds found with no warp but missed when a 1-bird-length swirl centre lies within half a bird-length of them (2 neighbours, purple). With the swirls on the targets, all three targets are lost but both neighbours are still found. Moving the swirls one bird-length away gives M3 back 2 of the 3 targets (M3-robust 1), but two of the swirl centres now sit on the neighbours, and both models lose both of them. At two bird-lengths one neighbour is still under a swirl and still missed. In a flock, moving the swirl away from its target moves the damage onto another bird instead of removing it, which is why other-bird recall in the table recovers more slowly than target recall.
+
 M3-robust does not help here. Its whole-set AP50 stays 0.004 to 0.028 above M3, roughly its clean-image margin, but its target recall is lower than M3's at distances 0 to 1 (0.438 vs 0.466 at 0). Its training augmentation is photometric only (colour, blur, noise, JPEG), so geometric distortion is outside what it learned to ignore.
 
 ![The swirl at each distance from one bird, with M3 and M3-robust detections](figures/examples_warp.jpg)
@@ -187,7 +191,7 @@ M3 at its best-F1 threshold on four test images: the most crowded image, a media
 
 **Non-protocol variant (`results_robust/`)**: the same files for M3-robust.
 
-**Figures (`figures/`)**: `training_curves.png`, `clean_vs_distorted.png`, `pr_curve_test.png`, `recall_by_size.png`, `examples_test.png`, `examples_distorted.jpg`, `examples_warp.jpg` (see Figures above).
+**Figures (`figures/`)**: `training_curves.png`, `clean_vs_distorted.png`, `pr_curve_test.png`, `recall_by_size.png`, `examples_test.png`, `examples_distorted.jpg`, `examples_warp.jpg`, `examples_warp_flock.jpg` (see Figures above).
 
 Checkpoints (`best.pt`, `last.pt`, `epochNNN.pt`) are not included because of their size.
 
