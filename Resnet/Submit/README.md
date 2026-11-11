@@ -137,6 +137,10 @@ Other birds also lose recall, and still do at four bird-lengths (0.834 vs 0.873)
 
 M3-robust does not help here. Its whole-set AP50 stays 0.004 to 0.028 above M3, roughly its clean-image margin, but its target recall is lower than M3's at distances 0 to 1 (0.438 vs 0.466 at 0). Its training augmentation is photometric only (colour, blur, noise, JPEG), so geometric distortion is outside what it learned to ignore.
 
+![The swirl at each distance from one bird, with M3 and M3-robust detections](figures/examples_warp.jpg)
+
+One test image (`beach_bird_1682`) at every distance. It was picked as the median-size target (65 px) among birds that are at least one bird-length from the image edge, alone in their image, found by M3 with no warp and missed with the swirl on them. Both models lose the bird when the swirl sits on it or half a bird-length away, where its body is bent into a different shape. At one bird-length it is only tilted and both find it again. At two and four bird-lengths the swirl bends the shoreline instead and the bird is untouched.
+
 The existing 5-type distortion set was left unchanged: adding the swirl to that rotation would change which image gets which distortion and invalidate the distorted results above.
 
 ### Precision-recall
@@ -183,7 +187,7 @@ M3 at its best-F1 threshold on four test images: the most crowded image, a media
 
 **Non-protocol variant (`results_robust/`)**: the same files for M3-robust.
 
-**Figures (`figures/`)**: `training_curves.png`, `clean_vs_distorted.png`, `pr_curve_test.png`, `recall_by_size.png`, `examples_test.png`, `examples_distorted.jpg` (see Figures above).
+**Figures (`figures/`)**: `training_curves.png`, `clean_vs_distorted.png`, `pr_curve_test.png`, `recall_by_size.png`, `examples_test.png`, `examples_distorted.jpg`, `examples_warp.jpg` (see Figures above).
 
 Checkpoints (`best.pt`, `last.pt`, `epochNNN.pt`) are not included because of their size.
 
