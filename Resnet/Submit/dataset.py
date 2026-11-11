@@ -221,6 +221,41 @@ def corrupt_image(image, idx):
     return ImageEnhance.Contrast(image).enhance(0.45)
 
 
+def swirl(points, centre, sigma, angle):
+    d = points - centre
+    theta = angle * np.exp(-(d ** 2).sum(-1, keepdims=True) / (2 * sigma ** 2))
+    c, s = np.cos(theta), np.sin(theta)
+    return centre + np.concatenate([c * d[..., :1] - s * d[..., 1:], s * d[..., :1] + c * d[..., 1:]], -1)
+
+
+def warp_image(image, swirls):
+    a = np.asarray(image, dtype=np.float32)
+    h, w = a.shape[:2]
+    xy = np.stack(np.meshgrid(np.arange(w), np.arange(h)), -1) + 0.5
+    for centre, sigma, angle in reversed(swirls):
+        xy = swirl(xy, centre, sigma, -angle)
+    x = np.clip(xy[..., 0] - 0.5, 0, w - 1)
+    y = np.clip(xy[..., 1] - 0.5, 0, h - 1)
+    x0, y0 = np.floor(x).astype(int), np.floor(y).astype(int)
+    x1, y1 = np.minimum(x0 + 1, w - 1), np.minimum(y0 + 1, h - 1)
+    fx, fy = (x - x0)[..., None], (y - y0)[..., None]
+    top = a[y0, x0] * (1 - fx) + a[y0, x1] * fx
+    bottom = a[y1, x0] * (1 - fx) + a[y1, x1] * fx
+    return Image.fromarray(np.rint(top * (1 - fy) + bottom * fy).astype(np.uint8))
+
+
+def warp_boxes(boxes, swirls, width, height):
+    t = np.linspace(0, 2 * np.pi, 64, endpoint=False)
+    out = []
+    for x1, y1, x2, y2 in boxes:
+        pts = np.stack([(x1 + x2) / 2 + (x2 - x1) / 2 * np.cos(t), (y1 + y2) / 2 + (y2 - y1) / 2 * np.sin(t)], -1)
+        for centre, sigma, angle in swirls:
+            pts = swirl(pts, centre, sigma, angle)
+        lo, hi = np.clip(pts.min(0), 0, (width, height)), np.clip(pts.max(0), 0, (width, height))
+        out.append([float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1])])
+    return out
+
+
 def collate_fn(batch):
     return tuple(zip(*batch))
 

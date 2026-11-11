@@ -106,6 +106,39 @@ One test image per distortion type (the median by bird count among images with 8
 - **Dark** (`beach_bird_1729`): overlapping curlews in water. M3 finds 9 of 11 birds and M3-robust 10; the remaining errors come from overlapping birds, not from the darkening.
 - **Low contrast** (`beach_bird_1775`): gulls against grey water and grass. M3 misses birds whose outline fades into the background (recall 0.74); M3-robust finds 17 of 19 (0.89).
 
+### Local warp (swirl) near a bird
+
+Robustness check, not a protocol result (`warp_eval.py`, run on a Colab T4 with both `best.pt` files). It asks how close to a bird a local geometric distortion has to be before the detector loses it.
+
+- Warp: a swirl that rotates the image by 90° at its centre and fades out with a Gaussian of sigma 0.5 x the bird's longer box side, so the effect covers about one bird-length and scales with each bird.
+- Targets: up to 3 birds per test image, chosen with a fixed per-image seed; 504 of the 1,518 test birds. Each image gets one swirl per target, all at the same distance.
+- Distance: the swirl centre is placed 0, 0.5, 1, 2 or 4 bird-lengths from the target's box centre, always in the same direction for a given bird (chosen so the farthest centre stays inside the image), so distance is the only thing that changes between rows.
+- Labels: every labelled box in the image is warped with the image (the ellipse inscribed in the box is swirled and re-boxed), so a moved bird is not scored against its old box.
+- Metrics: COCO metrics on the whole warped test set, plus recall of the warped (target) birds and of all other birds at score >= 0.25 and IoU 0.5. The target birds come mostly from sparse images (an image with three or fewer birds has all of them chosen), so their no-warp recall is higher than the other birds'; compare each group against its own "none" row.
+
+| Model | Swirl distance (bird-lengths) | AP50 | AP50:95 | AP75 | AP-small | AR@300 | Target recall | Other-bird recall |
+|---|---|---|---|---|---|---|---|---|
+| M3 | none | 0.881 | 0.488 | 0.473 | 0.335 | 0.583 | 0.923 | 0.873 |
+| M3 | 0 | 0.631 | 0.269 | 0.166 | 0.248 | 0.426 | 0.466 | 0.730 |
+| M3 | 0.5 | 0.652 | 0.296 | 0.211 | 0.268 | 0.447 | 0.522 | 0.733 |
+| M3 | 1 | 0.722 | 0.326 | 0.247 | 0.263 | 0.468 | 0.669 | 0.750 |
+| M3 | 2 | 0.806 | 0.418 | 0.379 | 0.297 | 0.531 | 0.873 | 0.783 |
+| M3 | 4 | 0.855 | 0.467 | 0.446 | 0.324 | 0.567 | 0.909 | 0.834 |
+| M3-robust | none | 0.895 | 0.499 | 0.487 | 0.343 | 0.586 | 0.935 | 0.879 |
+| M3-robust | 0 | 0.658 | 0.281 | 0.195 | 0.264 | 0.424 | 0.438 | 0.731 |
+| M3-robust | 0.5 | 0.676 | 0.305 | 0.236 | 0.271 | 0.448 | 0.498 | 0.746 |
+| M3-robust | 1 | 0.726 | 0.326 | 0.246 | 0.269 | 0.459 | 0.635 | 0.747 |
+| M3-robust | 2 | 0.834 | 0.434 | 0.392 | 0.314 | 0.538 | 0.883 | 0.794 |
+| M3-robust | 4 | 0.873 | 0.480 | 0.463 | 0.335 | 0.570 | 0.919 | 0.849 |
+
+A swirl centred on a bird halves its recall (M3 0.923 to 0.466) and costs 0.25 AP50 on the whole test set, far more than any of the five photometric distortions above (worst: blur, -0.113 on its 48 images). The damage is local: target recall is 0.669 with the swirl one bird-length away, 0.873 at two and 0.909 at four, within 0.015 of no warp. AP75 falls further than AP50 (0.473 to 0.166 at distance 0), so even the warped birds that are still found are often boxed less tightly.
+
+Other birds also lose recall, and still do at four bird-lengths (0.834 vs 0.873). In dense flocks a swirl placed one to two bird-lengths from its target can land on a neighbouring bird, so "other birds" are not untouched by the warp.
+
+M3-robust does not help here. Its whole-set AP50 stays 0.004 to 0.028 above M3, roughly its clean-image margin, but its target recall is lower than M3's at distances 0 to 1 (0.438 vs 0.466 at 0). Its training augmentation is photometric only (colour, blur, noise, JPEG), so geometric distortion is outside what it learned to ignore.
+
+The existing 5-type distortion set was left unchanged: adding the swirl to that rotation would change which image gets which distortion and invalidate the distorted results above.
+
 ### Precision-recall
 
 ![Test precision-recall curves at IoU 0.5](figures/pr_curve_test.png)
@@ -133,9 +166,10 @@ M3 at its best-F1 threshold on four test images: the most crowded image, a media
 **Code**
 - `train.py`: training, per-epoch validation, checkpointing, resume, final val/test export
 - `model.py`: Faster R-CNN ResNet50-FPN V2 with the protocol settings and frozen backbone BatchNorm
-- `dataset.py`: YOLO-label dataset, 640x640 letterbox, flip augmentation, distorted evaluation copies
+- `dataset.py`: YOLO-label dataset, 640x640 letterbox, flip augmentation, distorted evaluation copies, swirl warp for images and boxes
 - `evaluate.py`: prediction export in original-image pixels and COCO metrics (AP50, AP50:95, AP75, AP-small, AR@300)
 - `benchmark.py`: protocol runtime benchmark (section 7) on the test set
+- `warp_eval.py`: local swirl-warp robustness check (not a protocol result)
 - `requirements.txt`
 
 **Results (`results/`)**
@@ -145,6 +179,7 @@ M3 at its best-F1 threshold on four test images: the most crowded image, a media
 - `final_metrics.json`: best epoch, total run time and final metrics for every split
 - `config.json`: full run configuration, model settings and library versions
 - `preds_test_timing.json`: runtime benchmark (per-pass and aggregate timings, peak GPU memory, environment)
+- `warp/`: swirl-warp check: `warp_metrics.json` (settings and per-distance metrics) and `preds_test_warp_{none,d0,d0.5,d1,d2,d4}.csv` (robustness check only)
 
 **Non-protocol variant (`results_robust/`)**: the same files for M3-robust.
 
@@ -165,6 +200,8 @@ pip install -r requirements.txt
 1. `python train.py --data <root> --out <run folder>`: trains for 100 epochs, validating every epoch, then exports `preds_{val,test}[_distorted].csv`, `final_metrics.json` and `DONE` from `best.pt`. On Colab, put `--out` on Google Drive.
 2. Re-running the same command resumes from `last.pt` (model, optimiser, AMP scaler, schedule position, best score and history); a finished run (`DONE` present) is not retrained.
 3. `python benchmark.py --data <root> --ckpt <run folder>/best.pt --out <run folder>/preds_test_timing.json`: protocol runtime benchmark on a T4. Test images are preloaded in RAM; batch 8, FP16 autocast, eval and inference mode; 20 warm-up batches, then 3 timed passes over the full test set with CUDA synchronised at every batch boundary. Timing covers letterbox preprocessing, host-to-device transfer, the forward pass (including RPN and RoI NMS), coordinate restoration and the device-to-host copy. Reports aggregate throughput, mean and P95 batch time (full batches only), amortised ms/image and peak allocated GPU memory.
+
+4. `python warp_eval.py --data <root> --ckpt <run folder>/best.pt --out <run folder>/warp`: swirl-warp robustness check on the test set (one no-warp pass plus one pass per distance).
 
 `--epochs` and `--limit N` (first N images per split) exist for smoke tests only. `--robust` trains a separate **non-protocol** variant with colour jitter, blur, noise and JPEG augmentation; write it to a different `--out`.
 
