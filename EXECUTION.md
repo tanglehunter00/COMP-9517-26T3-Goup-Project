@@ -16,7 +16,7 @@ Implementation and validation:
 - Windows CRLF checkout is normalised when verifying the vendored Python source
   hash. Binary checkpoint and wheel verification still hashes exact bytes.
 
-Real-data execution is in progress. Full dataset audit passed: official split
+Real-data execution is blocked by storage. Full dataset audit passed: official split
 1369/291/240, one class, valid readable images/labels and no exact cross-split
 duplicates. Fixed 100-epoch runs started for M2, M3, M4 and P2-only.
 
@@ -36,3 +36,23 @@ No final real-data test accuracy or completed 100-epoch result is claimed here
 until execution finishes. Existing M1 results are inherited from the repository;
 M1 has not been retrained in this execution, and its trained forest was not
 included in the original repository.
+
+Preserved complete epochs: M2 **15/100**, M3 **1/100**, M4 **7/100**, P2-only
+**7/100**. Each last checkpoint was reloaded successfully and contains optimizer,
+scaler, scheduler progress and RNG states. Logs/configurations and a machine-readable
+status are in `results/progress/`. The actual resumable checkpoints remain local
+under the ignored run directories; unfinished weights have not been published as
+final models. No real-data test evaluation or final runtime benchmark was run.
+
+M2 encountered a CUDA illegal-memory-access error during validation of the next
+epoch while multiple jobs shared the Windows GPU. The root cause is unconfirmed.
+Its saved epoch-15 checkpoint subsequently completed standalone validation of all
+291 images successfully (30,256 exported boxes). No error was hidden as success;
+future execution uses the sequential runner. Remaining jobs were stopped for the
+storage block and preserve their previous complete epochs.
+
+After making at least 8 GB available, resume with the root `run_experiments.py`
+command. Alternatively pass `--runs-root <larger-drive-directory>`; existing local
+run directories are copied there if the destination is absent, then resumed.
+Original local checkpoints are retained. The runner checks remaining archive
+space before training and raises an explicit error if insufficient.

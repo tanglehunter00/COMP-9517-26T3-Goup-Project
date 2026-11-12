@@ -1,0 +1,52 @@
+{
+  "status": "blocked_storage",
+  "required_epochs": 100,
+  "test_evaluation_executed": false,
+  "free_bytes": 2940919808,
+  "methods": {
+    "m2": {
+      "completed_epochs": 15,
+      "optimizer_updates": 1290,
+      "selected_best_epoch": 13,
+      "validation_best_AP50": 0.7794787815050345,
+      "checkpoint_readable": true,
+      "resumable": true,
+      "training_complete": false,
+      "checkpoint": "Yolo Improeved\\runs\\m2\\last.pt",
+      "data_hash": "80d881ba0c9f8d44ad5c778e244c6a5e33a42c08dc87274a3fe72a1f22a0bceb"
+    },
+    "m3": {
+      "completed_epochs": 1,
+      "optimizer_updates": 343,
+      "selected_best_epoch": 1,
+      "validation_best_AP50": 0.7876616842984292,
+      "checkpoint_readable": true,
+      "resumable": true,
+      "training_complete": false,
+      "checkpoint": "Resnet\\runs\\m3\\last.pt",
+      "data_hash": "80d881ba0c9f8d44ad5c778e244c6a5e33a42c08dc87274a3fe72a1f22a0bceb"
+    },
+    "m4": {
+      "completed_epochs": 7,
+      "optimizer_updates": 602,
+      "selected_best_epoch": 7,
+      "validation_best_AP50": 0.6763236252464753,
+      "checkpoint_readable": true,
+      "resumable": true,
+      "training_complete": false,
+      "checkpoint": "Yolo Improeved\\runs\\m4\\last.pt",
+      "data_hash": "80d881ba0c9f8d44ad5c778e244c6a5e33a42c08dc87274a3fe72a1f22a0bceb"
+    },
+    "p2-only": {
+      "completed_epochs": 7,
+      "optimizer_updates": 602,
+      "selected_best_epoch": 7,
+      "validation_best_AP50": 0.6885416467241063,
+      "checkpoint_readable": true,
+      "resumable": true,
+      "training_complete": false,
+      "checkpoint": "Yolo Improeved\\runs\\p2-only\\last.pt",
+      "data_hash": "80d881ba0c9f8d44ad5c778e244c6a5e33a42c08dc87274a3fe72a1f22a0bceb"
+    }
+  }
+}

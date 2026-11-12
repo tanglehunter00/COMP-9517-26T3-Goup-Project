@@ -79,8 +79,6 @@ def main():
     if a.baseline and a.p2_only:
         p.error('--baseline and --p2-only are mutually exclusive')
     root = Path(a.root).resolve(); out = Path(a.out).resolve()
-    if not out.is_relative_to(HERE):
-        raise ValueError('Outputs must remain inside Yolo Improeved')
     out.mkdir(parents=True, exist_ok=True)
     if (out/'last.pt').exists() and not a.resume:
         raise ValueError('Run already exists; use --resume or a new output folder')

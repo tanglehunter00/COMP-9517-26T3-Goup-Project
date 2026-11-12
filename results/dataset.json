@@ -1,0 +1,18 @@
+{
+  "source": "liugalhigh/beach-bird",
+  "audit": {
+    "train": {
+      "images": 1369,
+      "boxes": 8663
+    },
+    "val": {
+      "images": 291,
+      "boxes": 1843
+    },
+    "test": {
+      "images": 240,
+      "boxes": 1518
+    }
+  },
+  "fingerprint": "80d881ba0c9f8d44ad5c778e244c6a5e33a42c08dc87274a3fe72a1f22a0bceb"
+}

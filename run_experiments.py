@@ -31,6 +31,7 @@ def execute(arguments, accelerated=True):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', required=True)
+    parser.add_argument('--runs-root', help='Optional checkpoint directory on a drive with sufficient free space')
     args = parser.parse_args()
     root = Path(args.root).resolve()
     results = HERE/'results'; results.mkdir(exist_ok=True)
@@ -38,6 +39,13 @@ def main():
     (results/'dataset.json').write_text(json.dumps(report, indent=2))
     runs = {'m2': SHARED/'runs/m2', 'm4': SHARED/'runs/m4',
             'p2-only': SHARED/'runs/p2-only', 'm3': HERE/'Resnet/runs/m3'}
+    if args.runs_root:
+        storage = Path(args.runs_root).resolve(); storage.mkdir(parents=True, exist_ok=True)
+        for method, source in list(runs.items()):
+            destination = storage/method
+            if source.exists() and not destination.exists():
+                shutil.copytree(source, destination)
+            runs[method] = destination
     # No test access until ALL training configurations have completed.
     for method, out in runs.items():
         last = out/'last.pt'
@@ -52,7 +60,8 @@ def main():
         required = sum(max(0, 10-len(list(folder.glob('epoch*.pt')))) *
             (346_000_000 if name=='m3' else 114_000_000) for name,folder in runs.items())
         required += 1_500_000_000
-        if shutil.disk_usage(HERE).free < required:
+        out.mkdir(parents=True, exist_ok=True)
+        if shutil.disk_usage(out).free < required:
             raise RuntimeError(f'Insufficient storage for fixed checkpoint retention: need {required} free bytes')
         command = ([HERE/'Resnet/pipeline.py', 'train'] if method=='m3' else [SHARED/'train.py'])
         command += ['--root', root, '--out', out]
