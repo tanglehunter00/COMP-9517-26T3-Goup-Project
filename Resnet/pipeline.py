@@ -92,6 +92,42 @@ def lr_at(update, total, warmup):
     return .000025+(.0025-.000025)*(1+math.cos(math.pi*phase))/2
 
 
+def update_group(model, batches, optimizer, scaler, device):
+    """Retry AMP overflows without dropping an update or repeating BN/RNG effects."""
+    buffers = [(buffer, buffer.clone()) for buffer in model.buffers()]
+    cpu_rng = torch.get_rng_state()
+    cuda_rng = torch.cuda.get_rng_state_all() if device.type=='cuda' else []
+    count = sum(len(images) for images, _ in batches)
+    for attempt in range(16):
+        if attempt:
+            with torch.no_grad():
+                for buffer, saved in buffers: buffer.copy_(saved)
+            torch.set_rng_state(cpu_rng)
+            if device.type=='cuda': torch.cuda.set_rng_state_all(cuda_rng)
+        optimizer.zero_grad(set_to_none=True)
+        losses = {}
+        for images, targets in batches:
+            n = len(images)
+            with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type=='cuda'):
+                parts = model(images, targets); loss = sum(parts.values())*n/count
+            if not torch.isfinite(loss): raise RuntimeError('Non-finite loss; fixed configuration failed')
+            scaler.scale(loss).backward()
+            for key, value in parts.items(): losses[key] = losses.get(key, 0.)+float(value.detach())*n
+        scaler.unscale_(optimizer)
+        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf'), error_if_nonfinite=False)
+        if torch.isfinite(norm):
+            scaler.step(optimizer); scaler.update(); optimizer.zero_grad(set_to_none=True)
+            return losses, count, attempt
+        if not scaler.is_enabled() or all(p.grad is None or torch.isfinite(p.grad).all() for p in model.parameters()):
+            raise RuntimeError('Non-finite gradient norm unrelated to AMP overflow')
+        previous_scale = scaler.get_scale()
+        # unscale_ detected non-finite gradients, so step skips the optimizer.
+        scaler.step(optimizer); scaler.update()
+        if scaler.get_scale() >= previous_scale:
+            raise RuntimeError('AMP failed to back off after gradient overflow')
+    raise RuntimeError('AMP overflow persisted after 16 retries; fixed configuration failed')
+
+
 @torch.inference_mode()
 def predict_batch(model, images, device):
     processed = [prepare(image) for image in images]
@@ -162,6 +198,7 @@ def train(args):
         torch=torch.__version__, torchvision=torchvision.__version__, seed=42, train_batch=2,
         accumulation=2, validation_batch=8, workers=2, precision='FP16' if device.type=='cuda' else 'FP32',
         optimizer='SGD', momentum=.9, nesterov=False, weight_decay=.0001,
+        amp_overflow_policy='back off and replay same accumulation group; restore buffers and RNG; max 16 retries',
         scheduler=dict(total_updates=total, warmup_updates=warmup),
         device=torch.cuda.get_device_name(device) if device.type=='cuda' else 'cpu',
         official_hardware=device.type=='cuda' and 'T4' in torch.cuda.get_device_name(device),
@@ -175,25 +212,17 @@ def train(args):
             pin_memory=device.type=='cuda', drop_last=False)
         model.train(); freeze_bn(model); optimizer.zero_grad(set_to_none=True)
         if device.type=='cuda': torch.cuda.reset_peak_memory_stats(device)
-        sync(device); began = time.perf_counter(); losses = {}; count = 0
+        sync(device); began = time.perf_counter(); losses = {}; count = 0; batches = []; amp_retries = 0
         for i, (images, targets) in enumerate(loader):
             images = [im.to(device) for im in images]
             targets = [{k:v.to(device) for k,v in target.items()} for target in targets]
-            n = len(images); group_images = min(4, len(dataset)-(i//2)*4)
-            with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type=='cuda'):
-                parts = model(images, targets); loss = sum(parts.values())*n/group_images
-            if not torch.isfinite(loss): raise RuntimeError('Non-finite loss; fixed configuration failed')
-            scaler.scale(loss).backward()
-            for k,v in parts.items(): losses[k] = losses.get(k, 0.)+float(v.detach())*n
-            count += n
+            batches.append((images, targets))
             if i%2==1 or i==len(loader)-1:
                 lr = lr_at(updates, total, warmup)
                 for group in optimizer.param_groups: group['lr'] = lr
-                scaler.unscale_(optimizer)
-                # A single total norm check avoids synchronising CUDA once per
-                # parameter. Infinite max_norm leaves finite gradients unchanged.
-                torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf'), error_if_nonfinite=True)
-                scaler.step(optimizer); scaler.update(); optimizer.zero_grad(set_to_none=True); updates += 1
+                group_losses, n, retries = update_group(model, batches, optimizer, scaler, device)
+                for k,v in group_losses.items(): losses[k] = losses.get(k, 0.)+v
+                count += n; amp_retries += retries; batches.clear(); updates += 1
         sync(device); training_s = time.perf_counter()-began
         peak = torch.cuda.max_memory_allocated(device) if device.type=='cuda' else 0
         model.eval(); began = time.perf_counter()
@@ -202,6 +231,7 @@ def train(args):
         improved = key>best
         if improved: best=key
         log = dict(epoch=epoch+1, losses={k:v/count for k,v in losses.items()}, lr=lr, updates=updates,
+            amp_retries=amp_retries, amp_scale=scaler.get_scale(),
             training_s=training_s, validation_s=time.perf_counter()-began, peak_training_allocated_bytes=peak, **metrics)
         with (out/'metrics.jsonl').open('a') as file: file.write(json.dumps(log, allow_nan=False)+'\n')
         print(json.dumps({k:v for k,v in log.items() if k!='density'}), flush=True)

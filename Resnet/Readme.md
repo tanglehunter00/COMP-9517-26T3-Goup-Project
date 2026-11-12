@@ -1,5 +1,11 @@
 # M3: Faster R-CNN ResNet50-FPN V2
 
+AMP overflow handling: reduce the loss scale and recompute the same accumulation
+group, restoring model buffers and CPU/CUDA RNG before retries. No scheduled
+optimizer update is dropped, and BatchNorm statistics advance only once per
+accepted microbatch. Finite losses and gradients remain required; persistent
+overflow after 16 retries fails explicitly. Logs include AMP retries and scale.
+
 `pipeline.py` implements the root protocol using torch 2.6.0 / torchvision 0.21.0.
 Install the matching CUDA wheels before the root requirements. COCO_V1 weights
 download automatically. The predictor has background + bird classes. The last
