@@ -50,7 +50,21 @@ def fingerprint(root):
 
 def save_atomic(path, checkpoint):
     tmp = path.with_suffix('.tmp')
-    torch.save(checkpoint, tmp); os.replace(tmp, path)
+    try:
+        torch.save(checkpoint, tmp); os.replace(tmp, path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def reconcile_log(out, completed_epochs):
+    """Discard rows written after the last durably saved epoch on interrupted I/O."""
+    path = out/'metrics.jsonl'
+    if path.exists():
+        rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        retained = [row for row in rows if row['epoch'] <= completed_epochs]
+        if retained != rows:
+            path.write_text(''.join(json.dumps(row, allow_nan=False)+'\n' for row in retained))
 
 
 def main():
@@ -102,6 +116,7 @@ def main():
         model.load_state_dict(resume['model']); optimizer.load_state_dict(resume['optimizer'])
         scaler.load_state_dict(resume['scaler'])
         start, updates, best = resume['epoch']+1, resume['updates'], tuple(resume['best'])
+        reconcile_log(out, start)
         random.setstate(resume['rng_python']); np.random.set_state(resume['rng_numpy'])
         torch.set_rng_state(resume['rng_torch'])
         if device.type == 'cuda':

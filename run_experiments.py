@@ -47,6 +47,13 @@ def main():
         if checkpoint and checkpoint['training_complete']:
             print(f'{method}: all 100 epochs already complete', flush=True)
             continue
+        # The fixed retention policy needs about 8.3 GB for all full checkpoints.
+        # Reserve the remaining archives and working copies before resuming.
+        required = sum(max(0, 10-len(list(folder.glob('epoch*.pt')))) *
+            (346_000_000 if name=='m3' else 114_000_000) for name,folder in runs.items())
+        required += 1_500_000_000
+        if shutil.disk_usage(HERE).free < required:
+            raise RuntimeError(f'Insufficient storage for fixed checkpoint retention: need {required} free bytes')
         command = ([HERE/'Resnet/pipeline.py', 'train'] if method=='m3' else [SHARED/'train.py'])
         command += ['--root', root, '--out', out]
         if method=='m2': command += ['--baseline']

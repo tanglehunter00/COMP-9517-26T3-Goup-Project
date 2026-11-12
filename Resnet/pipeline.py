@@ -20,7 +20,7 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from data import audit, image_paths, labels, letterbox, read_image, seed_worker
 from evaluate import evaluate, ground_truth, BACKEND
 from infer import benchmark, sync
-from train import fingerprint, save_atomic, seed_all
+from train import fingerprint, save_atomic, seed_all, reconcile_log
 
 
 def freeze_bn(model):
@@ -154,6 +154,7 @@ def train(args):
         model.load_state_dict(ckpt['model']); optimizer.load_state_dict(ckpt['optimizer'])
         scaler.load_state_dict(ckpt['scaler'])
         start, updates, best = ckpt['epoch']+1, ckpt['updates'], tuple(ckpt['best'])
+        reconcile_log(out, start)
         random.setstate(ckpt['rng_python']); np.random.set_state(ckpt['rng_numpy'])
         torch.set_rng_state(ckpt['rng_torch'])
         if device.type=='cuda': torch.cuda.set_rng_state_all(ckpt['rng_cuda'])
@@ -189,8 +190,9 @@ def train(args):
                 lr = lr_at(updates, total, warmup)
                 for group in optimizer.param_groups: group['lr'] = lr
                 scaler.unscale_(optimizer)
-                if any(p.grad is not None and not torch.isfinite(p.grad).all() for p in model.parameters()):
-                    raise RuntimeError('Non-finite gradient; fixed configuration failed')
+                # A single total norm check avoids synchronising CUDA once per
+                # parameter. Infinite max_norm leaves finite gradients unchanged.
+                torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf'), error_if_nonfinite=True)
                 scaler.step(optimizer); scaler.update(); optimizer.zero_grad(set_to_none=True); updates += 1
         sync(device); training_s = time.perf_counter()-began
         peak = torch.cuda.max_memory_allocated(device) if device.type=='cuda' else 0
