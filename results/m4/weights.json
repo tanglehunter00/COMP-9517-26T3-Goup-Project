@@ -1,0 +1,7 @@
+{
+  "file": "trained/m4-best.pt",
+  "sha256": "be59745c793023b8eb96a3b7ee4252263392efccbcdf479ded9129252aa2e2a9",
+  "selected_epoch": 75,
+  "precision": "original FP32 checkpoint tensors; inference uses FP16 autocast",
+  "inference_only": true
+}

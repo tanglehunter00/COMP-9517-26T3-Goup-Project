@@ -2,9 +2,10 @@
 
 **Latest update:** The user cleared storage (about 241 GB free), and sequential
 training resumed. M2 has completed all 100 epochs / 8,600 optimizer updates.
-The selected checkpoint is epoch 93 (validation AP50 0.8771966083). Original-FP32
-inference weights are in `trained/m2-best.pt` via Git LFS. M4, P2-only and M3
-remain in progress; final test evaluation is deferred until all finish.
+The selected M2 checkpoint is epoch 93 (validation AP50 0.8771966083). M4 has also
+completed all 100 epochs / 8,600 updates. Original-FP32 inference weights are in
+`trained/m2-best.pt` and `trained/m4-best.pt` via Git LFS. P2-only and M3 remain
+in progress; final test evaluation is deferred until all finish.
 The storage-block record below is historical.
 
 Implementation and validation:
