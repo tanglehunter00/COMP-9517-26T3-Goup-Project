@@ -1,0 +1,14 @@
+{
+  "m2": {
+    "identical_tensors": 499,
+    "sha256": "319c270463546c63676dc8073b416347e39b2e6b12aa1e29ffb5f9460b797366",
+    "selected_epoch": 93,
+    "training_complete": true
+  },
+  "m4": {
+    "identical_tensors": 566,
+    "sha256": "be59745c793023b8eb96a3b7ee4252263392efccbcdf479ded9129252aa2e2a9",
+    "selected_epoch": 75,
+    "training_complete": true
+  }
+}

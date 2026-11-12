@@ -1,0 +1,7 @@
+{
+  "file": "trained/p2-only-best.pt",
+  "sha256": "a64079421370a88f4c062741aebfbcf77a2770701e6ecdb3e5158ccf6510aef7",
+  "selected_epoch": 71,
+  "precision": "original FP32 checkpoint tensors; inference uses FP16 autocast",
+  "inference_only": true
+}
