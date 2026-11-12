@@ -23,7 +23,10 @@ def main():
     expected = json.loads((HERE/'vendor/SHA256.json').read_text())
     for name, digest in expected.items():
         path = HERE / name.replace('\\', '/')
-        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        content = path.read_bytes()
+        if path.suffix == '.py':
+            content = content.replace(b'\r\n', b'\n')
+        actual = hashlib.sha256(content).hexdigest()
         if actual != digest:
             raise RuntimeError(f'SHA256 mismatch: {path}')
         print(f'OK {path.name}: {actual}')

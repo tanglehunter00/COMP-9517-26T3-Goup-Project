@@ -11,6 +11,15 @@ from train import lr_at
 
 
 class PipelineTests(unittest.TestCase):
+    def test_baseline_head_and_transfer(self):
+        m, report = build_model(weights=Path(__file__).resolve().parents[1]/'checkpoints/yolo11s.pt', baseline=True)
+        self.assertEqual(m.stride.tolist(), [8., 16., 32.])
+        self.assertGreater(len(report['loaded']), 400)
+        m.eval()
+        with torch.no_grad():
+            result = m(torch.rand(1, 3, 64, 64))[0]
+        self.assertEqual(tuple(result.shape), (1, 5, 84))
+
     def test_dysample_backward_rectangular(self):
         x = torch.randn(2, 16, 5, 7, requires_grad=True)
         m = DySample(16)

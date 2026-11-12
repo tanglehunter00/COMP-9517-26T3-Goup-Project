@@ -4,10 +4,17 @@ import contextlib
 import csv
 import io
 import json
+import os
 from pathlib import Path
 import numpy as np
-from pycocotools.coco import COCO
-from pycocotools.cocoeval import COCOeval
+BACKEND = os.environ.get('COCO_BACKEND', 'pycocotools')
+if BACKEND == 'faster':
+    from faster_coco_eval import COCO, COCOeval_faster as COCOeval
+elif BACKEND == 'pycocotools':
+    from pycocotools.coco import COCO
+    from pycocotools.cocoeval import COCOeval
+else:
+    raise ValueError('COCO_BACKEND must be pycocotools or faster')
 from data import image_paths, read_image, labels
 
 

@@ -14,7 +14,7 @@ from ultralytics.cfg import get_cfg
 from data import TrainDataset, audit, seed_worker
 from model import HERE, build_model
 from infer import predict_split, sync
-from evaluate import ground_truth, evaluate
+from evaluate import ground_truth, evaluate, BACKEND
 
 
 def seed_all(seed):
@@ -58,9 +58,12 @@ def main():
     p.add_argument('--weights', default=str(HERE/'checkpoints/yolo11s.pt'))
     p.add_argument('--out', default=str(HERE/'runs/m4')); p.add_argument('--resume')
     p.add_argument('--p2-only', action='store_true'); p.add_argument('--device', default='cuda:0')
+    p.add_argument('--baseline', action='store_true', help='M2: standard YOLO11s with the identical protocol')
     p.add_argument('--smoke', action='store_true', help='2 epochs, non-official image counts; outputs explicitly marked')
     p.add_argument('--stop-after-epoch', type=int, help='Save and stop at this epoch; resume keeps the original schedule')
     a = p.parse_args()
+    if a.baseline and a.p2_only:
+        p.error('--baseline and --p2-only are mutually exclusive')
     root = Path(a.root).resolve(); out = Path(a.out).resolve()
     if not out.is_relative_to(HERE):
         raise ValueError('Outputs must remain inside Yolo Improeved')
@@ -79,9 +82,9 @@ def main():
     resume = torch.load(a.resume, map_location='cpu', weights_only=False) if a.resume else None
     if a.resume and Path(a.resume).resolve() != out/'last.pt':
         raise ValueError('Resume must use last.pt in the same output folder (preserves selected best)')
-    if resume and (resume['data_hash'] != data_hash or resume['ablation'] != a.p2_only or resume['epochs'] != epochs):
+    if resume and (resume['data_hash'] != data_hash or resume['ablation'] != a.p2_only or resume['epochs'] != epochs or resume.get('baseline', False) != a.baseline):
         raise ValueError('Resume data/model/schedule does not match')
-    model, transfer = build_model(a.p2_only, None if resume else a.weights)
+    model, transfer = build_model(a.p2_only, None if resume else a.weights, baseline=a.baseline)
     hyp = get_cfg(overrides=dict(imgsz=640, batch=8, seed=42, workers=2,
                   hsv_h=.015, hsv_s=.4, hsv_v=.3, degrees=0., translate=.1, scale=.3,
                   shear=0., perspective=0., flipud=0., fliplr=.5, mosaic=.5,
@@ -111,7 +114,7 @@ def main():
                   scheduler={'total_updates': total, 'warmup_updates': warmup},
                   device=torch.cuda.get_device_name(device) if device.type=='cuda' else 'cpu',
                   nondeterminism='warn_only=True; CUDA grid_sample backward may be nondeterministic',
-                  smoke=a.smoke)
+                  smoke=a.smoke, evaluator=BACKEND, official_hardware=device.type=='cuda' and 'T4' in torch.cuda.get_device_name(device))
     (out/'config.json').write_text(json.dumps(config, indent=2, default=str))
     if not resume:
         (out/'transfer.json').write_text(json.dumps(transfer, indent=2))
@@ -177,7 +180,7 @@ def main():
                     optimizer=optimizer.state_dict(), scaler=scaler.state_dict(),
                     scheduler={'updates': updates, 'total': total, 'warmup': warmup},
                     epoch=epoch, epochs=epochs, updates=updates, best=best, ablation=a.p2_only,
-                    data_hash=data_hash, smoke=a.smoke, training_complete=epoch==epochs-1,
+                    data_hash=data_hash, smoke=a.smoke, baseline=a.baseline, training_complete=epoch==epochs-1,
                     rng_python=random.getstate(), rng_numpy=np.random.get_state(), rng_torch=torch.get_rng_state(),
                     rng_cuda=torch.cuda.get_rng_state_all() if device.type=='cuda' else [])
         save_atomic(out/'last.pt', ckpt)

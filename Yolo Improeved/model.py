@@ -10,11 +10,11 @@ from vendor.dysample import DySample
 HERE = Path(__file__).resolve().parent
 
 
-def build_model(ablation=False, weights=None):
+def build_model(ablation=False, weights=None, baseline=False):
     if __version__ != '8.3.221':
         raise RuntimeError('This implementation requires ultralytics==8.3.221')
     tasks.DySample = DySample
-    cfg = HERE / 'configs' / ('yolo11s-p2.yaml' if ablation else 'yolo11s-p2-dysample.yaml')
+    cfg = 'yolo11s.yaml' if baseline else HERE / 'configs' / ('yolo11s-p2.yaml' if ablation else 'yolo11s-p2-dysample.yaml')
     model = tasks.DetectionModel(str(cfg), ch=3, nc=1, verbose=False)
     model.args = get_cfg()
     model.names = {0: 'bird'}
@@ -26,7 +26,7 @@ def build_model(ablation=False, weights=None):
             mapped = key
             # Existing backbone/neck 0..22 retain their original indices.
             # Old P3/P4/P5 detector branches become branches 1/2/3 in layer 26.
-            if key.startswith('model.23.'):
+            if key.startswith('model.23.') and not baseline:
                 mapped = key.replace('model.23.', 'model.26.', 1)
                 mapped = re.sub(r'(cv[23]\.)([012])\.',
                                 lambda m: m[1] + str(int(m[2]) + 1) + '.', mapped)
@@ -36,7 +36,7 @@ def build_model(ablation=False, weights=None):
             else:
                 report['skipped'].append(key)
         model.load_state_dict(target)
-    if model.stride.tolist() != [4., 8., 16., 32.]:
+    if model.stride.tolist() != ([8., 16., 32.] if baseline else [4., 8., 16., 32.]):
         raise RuntimeError(f'Unexpected detection strides: {model.stride}')
     return model, report
 
@@ -44,6 +44,6 @@ def build_model(ablation=False, weights=None):
 def load_model(path, device):
     # Only load trusted project checkpoints (optimizer/RNG state needs full pickle).
     ckpt = torch.load(path, map_location='cpu', weights_only=False)
-    model, _ = build_model(ckpt['ablation'])
+    model, _ = build_model(ckpt['ablation'], baseline=ckpt.get('baseline', False))
     model.load_state_dict(ckpt['model'])
     return model.to(device).eval(), ckpt

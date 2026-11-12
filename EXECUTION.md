@@ -1,0 +1,38 @@
+# Execution record — 2026-11-12
+
+Implementation and validation:
+
+- M2 standard YOLO11s now uses the same training and inference code as M4, with
+  the original three-scale head and direct compatible COCO weight transfer.
+- M3 Faster R-CNN V2 training, complete-state resume, original-coordinate
+  inference, common evaluation and runtime benchmark are implemented.
+- Seven YOLO/evaluation/NMS tests and two Faster R-CNN protocol tests passed.
+- M3 synthetic two-epoch CUDA FP16 training, interruption after epoch one,
+  complete-state resume, inference and benchmark passed. Synthetic measurements
+  in `results/verification/` are diagnostics, not Beach Bird experiment results.
+- Reference and accelerated COCO evaluation were compared on all existing RF
+  validation predictions. Largest observed metric difference was approximately
+  1.74e-18 (floating-point rounding); AP50 and AP50:95 matched exactly.
+- Windows CRLF checkout is normalised when verifying the vendored Python source
+  hash. Binary checkpoint and wheel verification still hashes exact bytes.
+
+Real-data execution is in progress. Full dataset audit passed: official split
+1369/291/240, one class, valid readable images/labels and no exact cross-split
+duplicates. Fixed 100-epoch runs started for M2, M3, M4 and P2-only.
+
+Hardware is **RTX 3090 24 GB**, Windows, Python 3.13, torch 2.6.0+cu124,
+torchvision 0.21.0+cu124, Ultralytics 8.3.221. These are local experiments;
+the prescribed **Colab T4 experiments remain unexecuted**. Training jobs share
+GPU/CPU resources, so logged training wall times are contended measurements.
+Final inference timing must run serially after all training ends.
+
+Storage limitation discovered during execution: C: had approximately 2.9 GB
+free, insufficient for all prescribed ten-epoch archives plus final checkpoints.
+Disposable synthetic weights were removed after retaining diagnostic logs. A
+request for additional storage was sent before exhausting space. No official
+archive retention, batch size, epoch count or input resolution was reduced.
+
+No final real-data test accuracy or completed 100-epoch result is claimed here
+until execution finishes. Existing M1 results are inherited from the repository;
+M1 has not been retrained in this execution, and its trained forest was not
+included in the original repository.

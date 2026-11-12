@@ -1,5 +1,49 @@
 # COMP-9517-26T3-Goup-Project
 
+## Reproducing the completed pipelines
+
+M1 code and previous training/predictions are in `Random Forest/Submit`. M2 now
+shares the matched YOLO training loop with M4. M3 is implemented in
+`Resnet/pipeline.py`. The original fixed protocol below remains authoritative.
+
+```powershell
+py -3.13 -m venv --system-site-packages .venv
+# First install matched torch 2.6.0 / torchvision 0.21.0 CUDA wheels.
+.venv/Scripts/python -m pip install -r requirements.txt
+.venv/Scripts/python "Yolo Improeved/download_assets.py"
+.venv/Scripts/python run_experiments.py --root <official-dataset-root>
+```
+
+Download the public dataset with `kagglehub.dataset_download('liugalhigh/beach-bird')`.
+Pass its `Beach Bird Detection Dataset v1.0` subdirectory, containing `images/`
+and `labels/`. Never alter the official split. The runner resumes matching
+`last.pt` checkpoints, runs 100 epochs per deep configuration, and defers all test
+evaluation until M2, M3, M4 and P2-only training has completed.
+
+Training can use `COCO_BACKEND=faster` (faster-coco-eval 1.7.0); final published
+metrics use reference pycocotools 2.0.11. Backend parity is tested. Loading
+torchvision explicitly enables compiled greedy hard NMS without changing its
+IoU threshold. Set the environment variable only when running individual training
+commands; `run_experiments.py` sets the backend for each subprocess.
+
+Full resumable checkpoints remain in ignored `runs/` folders. `trained/` contains
+inference-only selected checkpoints with original FP32 tensors, distributed via
+Git LFS (`git lfs pull` after cloning). `results/` contains data audit, per-epoch
+logs, final metrics, gzip-compressed CSV predictions and hardware-labelled timing
+when the runner completes. Inference-only weights cannot resume training.
+
+Local experiments on RTX 3090 are explicitly non-T4 results. Concurrent local
+training jobs share resources, so their training wall times are not isolated
+benchmarks. Final inference benchmarks must run serially with other training jobs
+stopped. See `EXECUTION.md` for measured execution status and limitations.
+
+Tests:
+
+```powershell
+.venv/Scripts/python -m unittest discover -s "Yolo Improeved/tests" -v
+.venv/Scripts/python -m unittest discover -s Resnet -p test_pipeline.py -v
+```
+
 Yolo repo:
 https://github.com/ultralytics/ultralytics
 

@@ -7,6 +7,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 import torch
+# Load torchvision explicitly so Ultralytics uses its compiled greedy hard NMS
+# rather than the Python/Torch fallback (thousands of CUDA launches per image).
+import torchvision
 from ultralytics.utils.nms import non_max_suppression
 from data import image_paths, read_image, letterbox
 from model import load_model
@@ -46,21 +49,21 @@ def predict_split(model, root, split, device):
     return rows
 
 
-def benchmark(model, images, device):
+def benchmark(model, images, device, predictor=predict_batch):
     if device.type != 'cuda':
         raise ValueError('Official deep-model timing requires CUDA FP16')
     batches = [images[i:i+8] for i in range(0, len(images), 8)]
     if not any(len(b) == 8 for b in batches):
         raise ValueError('Benchmark needs at least 8 images')
     for i in range(20):
-        predict_batch(model, batches[0], device)
+        predictor(model, batches[0], device)
     sync(device); torch.cuda.reset_peak_memory_stats(device)
     runs, times = [], []
     for _ in range(3):
         sync(device); start = time.perf_counter()
         for batch in batches:
             sync(device); t = time.perf_counter()
-            predict_batch(model, batch, device)
+            predictor(model, batch, device)
             sync(device)
             if len(batch) == 8:
                 times.append(time.perf_counter()-t)
