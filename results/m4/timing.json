@@ -1,0 +1,18 @@
+{
+  "device": "NVIDIA GeForce RTX 3090",
+  "official_hardware": false,
+  "images": 240,
+  "repeats": 3,
+  "warmup_batches": 20,
+  "batch": 8,
+  "repeat_seconds": [
+    1.2038878000021214,
+    1.2068136000016239,
+    1.2089736999987508
+  ],
+  "images_per_second": 198.9128803299234,
+  "amortised_ms_per_image": 5.027326527781245,
+  "mean_full_batch_ms": 40.214911110928774,
+  "p95_full_batch_ms": 41.52437999837275,
+  "peak_allocated_bytes": 563126784
+}

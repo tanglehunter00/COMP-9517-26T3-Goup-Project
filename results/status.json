@@ -1,0 +1,19 @@
+{
+  "status": "complete_local_hardware",
+  "epochs": 100,
+  "official_T4_experiment": false,
+  "selected_epochs": {
+    "m2": 93,
+    "m3": 18,
+    "p2-only": 71,
+    "m4": 75
+  },
+  "methods": [
+    "m2",
+    "m3",
+    "p2-only",
+    "m4"
+  ],
+  "final_evaluator": "pycocotools==2.0.11",
+  "rf_retrained": false
+}

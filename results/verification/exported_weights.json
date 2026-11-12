@@ -10,5 +10,17 @@
     "sha256": "be59745c793023b8eb96a3b7ee4252263392efccbcdf479ded9129252aa2e2a9",
     "selected_epoch": 75,
     "training_complete": true
+  },
+  "p2-only": {
+    "identical_tensors": 563,
+    "sha256": "a64079421370a88f4c062741aebfbcf77a2770701e6ecdb3e5158ccf6510aef7",
+    "selected_epoch": 71,
+    "training_complete": true
+  },
+  "m3": {
+    "identical_tensors": 404,
+    "sha256": "5b5eed4f77f26f0f4838fb0136ceaebfa79695328a7f2dad4be3019cfd026242",
+    "selected_epoch": 18,
+    "training_complete": true
   }
 }

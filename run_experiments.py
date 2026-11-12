@@ -97,7 +97,7 @@ def main():
         compact['inference_only'] = True
         weights = HERE/'trained'/f'{method}-best.pt'; weights.parent.mkdir(exist_ok=True)
         torch.save(compact, weights)
-        (destination/'weights.json').write_text(json.dumps(dict(file=str(weights.relative_to(HERE)),
+        (destination/'weights.json').write_text(json.dumps(dict(file=weights.relative_to(HERE).as_posix(),
             sha256=hashlib.sha256(weights.read_bytes()).hexdigest(), selected_epoch=selected['epoch']+1,
             precision='original FP32 checkpoint tensors; inference uses FP16 autocast',
             inference_only=True), indent=2))

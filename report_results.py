@@ -75,6 +75,8 @@ def main():
         lines.append(f"| {METHODS[method]} | {sum(r['training_s'] for r in rows):.1f} | {sum(r['validation_s'] for r in rows):.1f} | {rows[-1]['updates']} | {rows[-1]['lr']:.8f} |")
     lines += ['', '早期若干轮曾并发运行，随后改为顺序续训，因此上述训练耗时包含资源争用，不是隔离性能基准。中断轮从上一个完整 epoch 重放，表格仅累计最终保留日志，未计入失败/中断的未完成轮及启动开销。', '',
         'M2 曾发生 CUDA illegal-memory-access；保存的断点独立验证通过后续训。早期空间不足导致中断，用户清理空间后恢复。没有改变 batch、分辨率、训练轮数或归档频率。', '',
+        f"M3 在第 69 轮曾因 AMP 缩放溢出中断。修复后对相同累积组降低 scale 并重算，恢复随机状态和模型缓冲区，不跳过优化器更新。第 69–100 轮共记录 {sum(r.get('amp_retries',0) for r in logs['m3'])} 次重算。强制 CUDA 溢出测试验证了 BatchNorm、RNG 和参数更新的一致性。", '',
+        '跨越所有中断的完整总墙钟耗时未精确记录；上述训练与验证秒数为保留 epoch 的实测之和。', '',
         '训练中的 faster-coco-eval 1.7.0 已与参考后端验证数值一致；最终指标统一由参考 pycocotools 重算。DySample grid_sample 与 Faster R-CNN roi_align 的 CUDA 反向存在已记录的非确定性，未宣称逐位复现。', '',
         '![Validation curves](results/validation_curves.png)', '',
         '## 产物', '',

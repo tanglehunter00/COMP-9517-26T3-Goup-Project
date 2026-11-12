@@ -1,7 +1,7 @@
 # M4：YOLO11s + P2 + DySample
 
-所有实现均在本目录，不修改基础 YOLO、RF、Faster R-CNN 或上层协议。
-当前已实现并通过模拟数据诊断，尚未在 Beach Bird 上完成正式训练，没有正式实验成绩。
+本目录提供 M4、P2-only 及 M2 的共享训练与推理实现；固定实验协议保持不变。
+已在真实 Beach Bird 官方划分上完成 100 轮训练、统一测试和计时。当前 RTX 3090 配对结果见 [仓库实验报告](../EXPERIMENT_REPORT.md)，权重通过 Git LFS 发布；尚未执行 Colab T4 实验。
 
 ## 结构
 
@@ -15,7 +15,7 @@
 
 推荐正式实验使用 Colab T4。已在 Windows / Python 3.13.2 / torch 2.12.0+cu130 / torchvision 0.27.0+cu130 / RTX 5090 D 完成诊断，不能作为 T4 正式结果。
 
-在本目录打开 PowerShell。本次已经创建 `.venv`（复用现有 torch），并下载权重和固定版本源码包。重建命令：
+在本目录打开 PowerShell。历史诊断曾在本目录创建 `.venv`。本次执行使用仓库根目录的 `.venv`、torch 2.6.0 / torchvision 0.21.0，请优先按根 README 安装和运行。以下为旧的本目录环境重建示例：
 
 ```powershell
 python -m venv --system-site-packages .venv
@@ -89,4 +89,4 @@ DySample 的 CUDA grid_sample 反向传播可能非确定性，已启用 determi
 
 `--smoke` 使用 2 epoch、允许非官方数量，checkpoint 记录 `smoke=true`；推理默认拒绝，需显式 `--allow-smoke` 才能用于诊断。模拟数据和输出在忽略目录 `work/`、`runs/`，不能作为项目成绩。
 
-尚未验证真实 Beach Bird 全量训练、T4 固定 batch 显存可行性、正式精度/耗时、与基础 YOLO 的配对实验。固定配置若失败，应记录失败，不改 batch/分辨率/epochs 来冒充协议结果。
+真实 Beach Bird 全量训练、统一评估、RTX 3090 计时和基础 YOLO 配对实验已完成，结果见仓库根报告。T4 固定 batch 的显存和耗时仍未实测，不将本机结果冒充 T4 结果。
