@@ -1,6 +1,6 @@
 # COMP-9517-26T3-Goup-Project
 
-**Execution complete (2026-11-13):** M2, M3, M4 and P2-only each completed 100 epochs. Selected weights, final common evaluation and serial inference timing are published. See [experiment results](EXPERIMENT_REPORT.md) and [execution verification](EXECUTION.md). Hardware was RTX 3090; official Colab T4 execution remains unexecuted.
+**Execution complete (2026-11-13):** M2, M3, M4 and P2-only each completed 100 epochs. Selected weights, final common evaluation and serial inference timing are published. See [中英文实验报告 / bilingual experiment results](EXPERIMENT_REPORT.md) and [execution verification](EXECUTION.md). Hardware was RTX 3090; official Colab T4 execution remains unexecuted.
 
 ## Reproducing the completed pipelines
 
