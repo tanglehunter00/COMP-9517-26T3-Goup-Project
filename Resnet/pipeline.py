@@ -32,8 +32,8 @@ def freeze_bn(model):
 
 
 def build_model(pretrained=True):
-    if torchvision.__version__.split('+')[0] != '0.21.0':
-        raise RuntimeError('M3 requires torchvision==0.21.0 (paired with torch==2.6.0)')
+    if torchvision.__version__.split('+')[0] not in {'0.21.0', '0.27.0'}:
+        raise RuntimeError('M3 supports torchvision 0.21.0 or 0.27.0 with matching PyTorch')
     model = fasterrcnn_resnet50_fpn_v2(
         weights='COCO_V1' if pretrained else None, weights_backbone=None,
         trainable_backbone_layers=3 if pretrained else 5,
@@ -176,14 +176,19 @@ def train(args):
     torch.backends.cudnn.benchmark = False
     report = audit(args.root, official=not args.smoke); data_hash = fingerprint(args.root)
     epochs = 2 if args.smoke else 100
+    batch_size = args.batch
+    if batch_size < 1:
+        raise ValueError('Training batch must be positive')
     ckpt = torch.load(args.resume, map_location='cpu', weights_only=False) if args.resume else None
     if ckpt and (ckpt['data_hash'] != data_hash or ckpt['epochs'] != epochs or ckpt['smoke'] != args.smoke):
         raise ValueError('Resume data or schedule mismatch')
+    if ckpt and ckpt.get('train_batch', 2) != batch_size:
+        raise ValueError('Resume training batch mismatch')
     model = build_model(pretrained=not bool(ckpt)).to(device)
     optimizer = torch.optim.SGD([p for p in model.parameters() if p.requires_grad],
                                lr=.0025, momentum=.9, weight_decay=.0001, nesterov=False)
     scaler = torch.amp.GradScaler('cuda', init_scale=128., enabled=device.type=='cuda')
-    dataset = Birds(args.root); steps = math.ceil(len(dataset)/4)
+    dataset = Birds(args.root); steps = math.ceil(len(dataset)/(batch_size*2))
     total, warmup = epochs*steps, steps
     start, updates, best = 0, 0, (-1., -1.)
     if ckpt:
@@ -191,11 +196,12 @@ def train(args):
         scaler.load_state_dict(ckpt['scaler'])
         start, updates, best = ckpt['epoch']+1, ckpt['updates'], tuple(ckpt['best'])
         reconcile_log(out, start)
+        reconcile_log(out, start, 'epoch_timing.jsonl')
         random.setstate(ckpt['rng_python']); np.random.set_state(ckpt['rng_numpy'])
         torch.set_rng_state(ckpt['rng_torch'])
         if device.type=='cuda': torch.cuda.set_rng_state_all(ckpt['rng_cuda'])
     config = dict(args=vars(args), data=report, data_hash=data_hash, epochs=epochs,
-        torch=torch.__version__, torchvision=torchvision.__version__, seed=42, train_batch=2,
+        torch=torch.__version__, torchvision=torchvision.__version__, seed=42, train_batch=batch_size,
         accumulation=2, validation_batch=8, workers=2, precision='FP16' if device.type=='cuda' else 'FP32',
         optimizer='SGD', momentum=.9, nesterov=False, weight_decay=.0001,
         amp_overflow_policy='back off and replay same accumulation group; restore buffers and RNG; max 16 retries',
@@ -206,8 +212,9 @@ def train(args):
     (out/'config.json').write_text(json.dumps(config, indent=2))
     gt = ground_truth(args.root, 'val')
     for epoch in range(start, epochs):
+        epoch_started = time.perf_counter()
         seed_all(42+epoch)
-        loader = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=2, collate_fn=collate,
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2, collate_fn=collate,
             worker_init_fn=seed_worker, generator=torch.Generator().manual_seed(42+epoch),
             pin_memory=device.type=='cuda', drop_last=False)
         model.train(); freeze_bn(model); optimizer.zero_grad(set_to_none=True)
@@ -235,15 +242,20 @@ def train(args):
             training_s=training_s, validation_s=time.perf_counter()-began, peak_training_allocated_bytes=peak, **metrics)
         with (out/'metrics.jsonl').open('a') as file: file.write(json.dumps(log, allow_nan=False)+'\n')
         print(json.dumps({k:v for k,v in log.items() if k!='density'}), flush=True)
+        checkpoint_started = time.perf_counter()
         state = dict(model={k:v.detach().cpu() for k,v in model.state_dict().items()},
             optimizer=optimizer.state_dict(), scaler=scaler.state_dict(), epoch=epoch, epochs=epochs,
             scheduler=dict(updates=updates, total=total, warmup=warmup), updates=updates, best=best,
-            data_hash=data_hash, smoke=args.smoke, training_complete=epoch==epochs-1,
+            data_hash=data_hash, smoke=args.smoke, train_batch=batch_size, training_complete=epoch==epochs-1,
             rng_python=random.getstate(), rng_numpy=np.random.get_state(), rng_torch=torch.get_rng_state(),
             rng_cuda=torch.cuda.get_rng_state_all() if device.type=='cuda' else [])
         save_atomic(out/'last.pt', state)
         if improved: save_atomic(out/'best.pt', state)
         if (epoch+1)%10==0: save_atomic(out/f'epoch{epoch+1:03}.pt', state)
+        timing = dict(epoch=epoch+1, training_s=training_s, validation_s=log['validation_s'],
+            checkpoint_s=time.perf_counter()-checkpoint_started, epoch_wall_s=time.perf_counter()-epoch_started)
+        with (out/'epoch_timing.jsonl').open('a') as file:
+            file.write(json.dumps(timing, allow_nan=False)+'\n')
         if args.stop_after_epoch and epoch+1>=args.stop_after_epoch and epoch+1<epochs: return
     selected = torch.load(out/'best.pt', map_location='cpu', weights_only=False)
     selected['training_complete']=True; save_atomic(out/'best.pt', selected)
@@ -271,6 +283,7 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser(); parser.add_argument('mode', choices=['train','infer'])
     parser.add_argument('--root', required=True); parser.add_argument('--out', required=True)
     parser.add_argument('--device', default='cuda:0'); parser.add_argument('--resume')
+    parser.add_argument('--batch', type=int, default=2, help='Actual training batch; fixed historical default is 2')
     parser.add_argument('--smoke', action='store_true'); parser.add_argument('--stop-after-epoch', type=int)
     parser.add_argument('--weights'); parser.add_argument('--split', choices=['val','test'], default='val')
     parser.add_argument('--benchmark', action='store_true'); parser.add_argument('--allow-smoke', action='store_true')

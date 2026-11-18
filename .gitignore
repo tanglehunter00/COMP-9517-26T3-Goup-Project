@@ -4,3 +4,7 @@ __pycache__/
 *.pyc
 **/runs/
 **/checkpoints/
+/outputs/
+# Retain historical report copies locally; commit the latest canonical report.
+/reports/*_5090D*.docx
+/reports/*_5090D*.pdf

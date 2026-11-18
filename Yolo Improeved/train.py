@@ -57,9 +57,9 @@ def save_atomic(path, checkpoint):
         raise
 
 
-def reconcile_log(out, completed_epochs):
+def reconcile_log(out, completed_epochs, filename='metrics.jsonl'):
     """Discard rows written after the last durably saved epoch on interrupted I/O."""
-    path = out/'metrics.jsonl'
+    path = out/filename
     if path.exists():
         rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
         retained = [row for row in rows if row['epoch'] <= completed_epochs]
@@ -115,6 +115,7 @@ def main():
         scaler.load_state_dict(resume['scaler'])
         start, updates, best = resume['epoch']+1, resume['updates'], tuple(resume['best'])
         reconcile_log(out, start)
+        reconcile_log(out, start, 'epoch_timing.jsonl')
         random.setstate(resume['rng_python']); np.random.set_state(resume['rng_numpy'])
         torch.set_rng_state(resume['rng_torch'])
         if device.type == 'cuda':
@@ -133,6 +134,7 @@ def main():
         (out/'transfer.json').write_text(json.dumps(transfer, indent=2))
     gt = ground_truth(root, 'val')
     for epoch in range(start, epochs):
+        epoch_started = time.perf_counter()
         # Epoch-specific seeds and a fresh dataset also make interrupted epoch replay reproducible.
         seed_all(42+epoch)
         epoch_hyp = get_cfg(overrides=vars(hyp))
@@ -189,6 +191,7 @@ def main():
         with (out/'metrics.jsonl').open('a') as f:
             f.write(json.dumps(log, allow_nan=False)+'\n')
         print(json.dumps({k:v for k,v in log.items() if k!='density'}), flush=True)
+        checkpoint_started = time.perf_counter()
         ckpt = dict(model={k:v.detach().cpu() for k,v in model.state_dict().items()},
                     optimizer=optimizer.state_dict(), scaler=scaler.state_dict(),
                     scheduler={'updates': updates, 'total': total, 'warmup': warmup},
@@ -201,6 +204,11 @@ def main():
             save_atomic(out/'best.pt', ckpt)
         if (epoch+1)%10 == 0:
             save_atomic(out/f'epoch{epoch+1:03}.pt', ckpt)
+        timing = dict(epoch=epoch+1, training_s=train_s, validation_s=val_s,
+                      checkpoint_s=time.perf_counter()-checkpoint_started,
+                      epoch_wall_s=time.perf_counter()-epoch_started)
+        with (out/'epoch_timing.jsonl').open('a') as file:
+            file.write(json.dumps(timing, allow_nan=False)+'\n')
         if a.stop_after_epoch and epoch+1 >= a.stop_after_epoch and epoch+1 < epochs:
             print('Saved interruption checkpoint; resume from last.pt to finish the unchanged schedule')
             return

@@ -1,5 +1,17 @@
 # COMP-9517-26T3-Goup-Project
 
+## Latest experiments / 最新实验 2026-11-18
+
+The RTX 5090 D rerun is complete: all four deep configurations trained for 100
+epochs with actual batch 8, accumulation 2 and seed 42; RF was refitted on CPU.
+The frozen checkpoints also completed 20 controlled validation conditions and
+25 full-validation corruption conditions. No additional training seeds were used.
+
+5090 D 统一配置横评、前置受控补充实验及五种方法的鲁棒性横评均已完成。
+运行顺序、依赖、复现命令和代码索引见 [experiment code guide](EXPERIMENTS_5090D.md)。
+最新中文报告和轻量结果记录位于 [reports](reports/)。以下 3090 结果及原始配置说明
+属于历史实验；本轮的 batch 和硬件设置以新实验指南为准。
+
 **Execution complete (2026-11-13):** M2, M3, M4 and P2-only each completed 100 epochs. Selected weights, final common evaluation and serial inference timing are published. See [中英文实验报告 / bilingual experiment results](EXPERIMENT_REPORT.md) and [execution verification](EXECUTION.md). Hardware was RTX 3090; official Colab T4 execution remains unexecuted.
 
 ## Reproducing the completed pipelines
