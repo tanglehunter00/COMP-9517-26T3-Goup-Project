@@ -1,0 +1,4 @@
+# Install a compatible matched CUDA-enabled torch/torchvision pair first.
+# Recorded run: torch 2.12.0+cu130, torchvision 0.27.0+cu130, Python 3.13.2.
+-r requirements-5090d.txt
+Pillow==11.3.0
