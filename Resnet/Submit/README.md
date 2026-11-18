@@ -1,6 +1,10 @@
 # M3: Faster R-CNN ResNet50-FPN V2
 
-**Owner:** [your name] | **Group:** Group 104 | **Course:** COMP9517 2026 T3
+> Original feature/resnet-model record: this batch-2 T4 experiment is separate
+> from the matched 5090 D comparison. Use project.py original-resnet from the root.
+> Figures and raw predictions remain in the full Git repository, outside the code ZIP.
+
+**Group:** Group 104 | **Course:** COMP9517 2026 T3
 
 ## Summary of work completed
 
