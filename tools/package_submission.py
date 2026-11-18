@@ -18,7 +18,11 @@ NAME = "COMP9517_Group104_Code"
 MAX_BYTES = 25_000_000
 REQUIRED = (
     "README.md", "SUBMISSION.md", "THIRD_PARTY.md",
+    "INTEGRATION.md", "project.py", "tests/test_project_integration.py",
+    "Yolo/original_pipeline.py", "Yolo/Readme.md", "Resnet/Readme.md",
+    "Yolo Improeved/Readme.md", "Random Forest/Submit/README.md",
     "requirements-submission.txt", "requirements-5090d.txt",
+    "requirements.txt", "requirements-legacy-3090.txt",
     "run_serial_benchmark.py", "controlled_diagnostics.py",
     "robustness_benchmark.py", "tools/package_submission.py",
     "Yolo/train.py", "Resnet/pipeline.py", "Resnet/test_pipeline.py",
@@ -41,6 +45,8 @@ PATTERNS = (
     "Random Forest/Submit/*.py", "Random Forest/Submit/requirements.txt",
     "Yolo Improeved/*.py", "Yolo Improeved/configs/*.yaml",
     "Yolo Improeved/tests/*.py", "reports/epoch_logs/*.csv",
+    "Yolo/training/**/*.py", "Yolo/evaluation/*.py",
+    "Resnet/Submit/*.py", "Resnet/Submit/requirements.txt",
 )
 FORBIDDEN_PARTS = {".git", ".venv", "__pycache__", "node_modules", "trained",
                    "checkpoints", "images", "runs", "results"}
@@ -118,8 +124,8 @@ def build(root, output):
             raise ValueError(f"Archive exceeds source ZIP limit: {size} bytes")
         archive.write_bytes(candidate.read_bytes())
     checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
-    (output / f"{NAME}.sha256").write_text(
-        f"{checksum}  {archive.name}\n", encoding="utf-8")
+    (output / f"{NAME}.sha256").write_bytes(
+        f"{checksum}  {archive.name}\n".encode("utf-8"))
     (output / f"{NAME}.manifest.json").write_bytes(manifest_bytes)
     return archive, manifest, checksum
 
