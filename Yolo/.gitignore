@@ -1,0 +1,27 @@
+# 1. Datasets & Annotations
+data/
+*.json
+instances_*.json
+
+# 2. Model Weights & Training Logs (YOLO/R-CNN outputs)
+*.pt
+*.pth
+*.weights
+runs/
+wandb/
+logs/
+
+# 3. Python & Virtual Environments
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# 4. Jupyter Notebooks
+.ipynb_checkpoints/
+
+# 5. OS & IDE (macOS and VS Code files)
+.DS_Store
+.vscode/

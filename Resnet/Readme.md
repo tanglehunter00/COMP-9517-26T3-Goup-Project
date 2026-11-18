@@ -1,38 +1,46 @@
-# M3: Faster R-CNN ResNet50-FPN V2
+# Faster R-CNN implementations
 
-AMP overflow handling: reduce the loss scale and recompute the same accumulation
-group, restoring model buffers and CPU/CUDA RNG before retries. No scheduled
-optimizer update is dropped, and BatchNorm statistics advance only once per
-accepted microbatch. Finite losses and gradients remain required; persistent
-overflow after 16 retries fails explicitly. Logs include AMP retries and scale.
+## Matched-comparison M3
 
-`pipeline.py` implements the root protocol using torch 2.6.0 / torchvision 0.21.0.
-Install the matching CUDA wheels before the root requirements. COCO_V1 weights
-download automatically. The predictor has background + bird classes. The last
-three ResNet stages train; backbone BatchNorm affine parameters and running
-statistics stay frozen after each call to `train()`.
+`pipeline.py` implements Faster R-CNN ResNet50-FPN V2 with a two-class
+background/bird predictor, three trainable ResNet stages and frozen backbone
+BatchNorm. Input uses a 640 letterbox canvas. The common entry point selects
+actual train batch 8 explicitly; the standalone historical default is batch 2.
 
-Input images and targets are letterboxed onto a 640 canvas with RGB 114; internal
-min/max resize is 640. Training uses batch 2, accumulation 2 (including the final
-partial group), SGD 0.0025, momentum 0.9, decay 0.0001, one-epoch linear warmup and
-cosine decay to 0.000025. Only horizontal flip 0.5 augments training images.
-Validation/inference uses batch 8, AMP FP16, RoI hard NMS 0.6 and max 300 outputs;
-RPN NMS stays 0.7. There is no second output NMS.
-
-```powershell
-python Resnet/pipeline.py train --root <dataset> --out Resnet/runs/m3
-python Resnet/pipeline.py train --root <dataset> --out Resnet/runs/m3 --resume Resnet/runs/m3/last.pt
-python Resnet/pipeline.py infer --root <dataset> --weights Resnet/runs/m3/best.pt --split val --out Resnet/runs/m3/val.csv
+```text
+python project.py train --method m3 --root DATASET --run RUN
+python project.py train --method m3 --root DATASET --run RUN --resume
+python project.py infer --method m3 --root DATASET --run RUN --split val
+python project.py evaluate --method m3 --root DATASET --run RUN --split val
 ```
 
-After all training completes, infer with `--split test --benchmark`. CSV boxes use
-original coordinates and dataset class 0; metrics use the shared COCO evaluator.
-Benchmark preloads images, warms up 20 batches, repeats the full set three times,
-and labels non-T4 hardware explicitly. Checkpoints save optimizer, AMP, update
-schedule, RNG and dataset fingerprint. Best selection is AP50, then AP50:95, then
-earlier epoch. Resume requires the same run directory and data fingerprint.
+The matched preset uses 100 epochs, seed 42, accumulation 2, SGD peak LR 0.0025,
+momentum 0.9, decay 0.0001, one-epoch warmup, cosine decay and horizontal flip.
+AMP overflow handling replays the same accumulation group with restored state.
+Best ranking is validation AP50, AP50:95, then the earlier epoch.
+Inference uses batch 8, FP16, RPN NMS 0.7, RoI NMS 0.6 and at most 300 outputs.
 
-Diagnostics: `--smoke` uses two epochs on synthetic data and marks checkpoints;
-inference rejects them unless `--allow-smoke` is explicit. `--stop-after-epoch 1`
-exercises interruption and resume. Run tests with
-`python -m unittest discover -s Resnet -p test_pipeline.py -v`.
+## Original feature/resnet-model contribution
+
+`Submit/` is the original team's independent implementation, merged with history.
+It includes dataset/model/train/evaluate helpers, runtime benchmarking,
+training-time distortion augmentation and local swirl-warp evaluation.
+
+```text
+python project.py original-resnet train --root DATASET --run RUN
+python project.py original-resnet train --root DATASET --run RUN --robust
+python project.py original-resnet benchmark --root DATASET --run RUN --split val
+python project.py original-resnet warp --root DATASET --run RUN --split val
+```
+
+Original M3 uses actual batch 2, accumulation 2 and a different checkpoint schema.
+It resumes automatically from its `last.pt` and skips a completed `DONE` run.
+After its own training finishes it automatically exports clean/distorted
+validation and test predictions. The robust version adds extra augmentation
+and is stored separately; it is not a matched-comparison configuration.
+
+Outputs stay under `RUN/original-resnet/` or
+`RUN/original-resnet-robust/`. `--weights` selects a trusted original checkpoint
+for benchmark/warp. The original `Submit/README.md` and research records describe
+its T4 experiment; they must not be pooled with the matched 5090 D results.
+No original GPU experiment was rerun during integration.

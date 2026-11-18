@@ -3,9 +3,19 @@
   "description": "English COMP9517 Group 104 source submission",
   "files": [
     {
+      "path": "INTEGRATION.md",
+      "bytes": 5363,
+      "sha256": "289b528dc55ab1cee395b0b4be0167f5492c673aab5f882b3d83a10e2b964e47"
+    },
+    {
       "path": "README.md",
-      "bytes": 11458,
-      "sha256": "8a26e410d0da90ccc4c1a7c0e6749028fc8ac2ef3e0df53499185953ef33c515"
+      "bytes": 9764,
+      "sha256": "4ed08ab13bf56bf24a7808a86629ea6c27635fc7a3c424fe2522d2ae1e1a8516"
+    },
+    {
+      "path": "Random Forest/Submit/README.md",
+      "bytes": 7523,
+      "sha256": "3765436ddd6865a1e6ee6c96e00cf55547fc9fb2ad882664982fcfb4e9019a3c"
     },
     {
       "path": "Random Forest/Submit/build_samples.py",
@@ -63,6 +73,46 @@
       "sha256": "d59569e848f4eec874fd6f4074275dd7f790a134db643677f4eea46e4a99b87b"
     },
     {
+      "path": "Resnet/Readme.md",
+      "bytes": 2349,
+      "sha256": "ebb5bbb10e05e4f506d15de9a978174580e54cb3b856dbec1207c7f9ae0250d7"
+    },
+    {
+      "path": "Resnet/Submit/benchmark.py",
+      "bytes": 5616,
+      "sha256": "9a19ba436206c1a123ebd42cb0b4499c45526a320c0868a02957c2ef1e5caf12"
+    },
+    {
+      "path": "Resnet/Submit/dataset.py",
+      "bytes": 9272,
+      "sha256": "08f89664e85959f90044fdc207cf2e58b8c3e733284c73d7227a11a9c6e18933"
+    },
+    {
+      "path": "Resnet/Submit/evaluate.py",
+      "bytes": 7184,
+      "sha256": "e3c2f1947c45f84ababbf367aa8b3ee7d4d61ef2b539904b4f9550c4871637e7"
+    },
+    {
+      "path": "Resnet/Submit/model.py",
+      "bytes": 1535,
+      "sha256": "6a39345dc1243dda743dcec1e48733bc950256af47dacce3d0375b2f142ba237"
+    },
+    {
+      "path": "Resnet/Submit/requirements.txt",
+      "bytes": 48,
+      "sha256": "7bb44ba40f98c95286c591b083d702c39440562af12b0b7fe0205b93cdd9d85d"
+    },
+    {
+      "path": "Resnet/Submit/train.py",
+      "bytes": 10505,
+      "sha256": "967d549d53ab7838353359ca9ac7bc4052cc2361fcf7df963a40df5d423d3188"
+    },
+    {
+      "path": "Resnet/Submit/warp_eval.py",
+      "bytes": 7124,
+      "sha256": "411f5a244aa6606e33b5af6a65216033e3ddd60a6c4ce1d6e4188deb3d16e8b1"
+    },
+    {
       "path": "Resnet/pipeline.py",
       "bytes": 16269,
       "sha256": "0e73937d63eba6fdc96aa581a5209209b574f34d2a3fa51442c91a4eedcef55d"
@@ -74,13 +124,18 @@
     },
     {
       "path": "SUBMISSION.md",
-      "bytes": 3732,
-      "sha256": "400c0e8f4d903c532c82c4315648bfccc67c1567234d0453f9fd49c30e926ec7"
+      "bytes": 2730,
+      "sha256": "d07251d4dd7c56294ed688d89776bec4fe587ebd7662f71786e35bbfb95bc076"
     },
     {
       "path": "THIRD_PARTY.md",
-      "bytes": 2518,
-      "sha256": "1228e39f3d83218f10c852687a21b684075d046c9291edcba1ab7c221ff7571e"
+      "bytes": 2555,
+      "sha256": "22403c4386ef69732e8b36459fe8f93d2fdd0ac48a5127381d9c3f086fb39040"
+    },
+    {
+      "path": "Yolo Improeved/Readme.md",
+      "bytes": 3033,
+      "sha256": "6437f6eb6c231e39a0937e5a5ad2a82303881ffcb8fb2457c173e218fe40e737"
     },
     {
       "path": "Yolo Improeved/configs/yolo11s-p2-dysample.yaml",
@@ -173,14 +228,64 @@
       "sha256": "c3f8dff42b81ce292c44165b99275d2803af77da6aff2046ee8a1dbcb753f233"
     },
     {
+      "path": "Yolo/Readme.md",
+      "bytes": 2025,
+      "sha256": "729d52cf8854b0a05cfbc8eeae60a99924c7f1a792704af07e3c76a0035b0f86"
+    },
+    {
+      "path": "Yolo/evaluation/evaluation_yolo.py",
+      "bytes": 654,
+      "sha256": "dfda4786d7f702a5ce3288dbb4d82ab3b56157e518b3baef4b85c7a8b02b6202"
+    },
+    {
+      "path": "Yolo/original_pipeline.py",
+      "bytes": 4726,
+      "sha256": "66ae4dd5ba05213437ab35a431596b219488d1ac2b63efb2b60564c98b857edc"
+    },
+    {
       "path": "Yolo/train.py",
       "bytes": 354,
       "sha256": "97c2f9a016eb92e536cf96efd5fdd5a1c3688d26cef1db5fd64610b11714edd1"
     },
     {
+      "path": "Yolo/training/resume_smoke_test.py",
+      "bytes": 502,
+      "sha256": "8102ee12bddae08cd73172480abdf6521fe3d37bf1ba75ffd5385e331b6aa99d"
+    },
+    {
+      "path": "Yolo/training/resume_training.py",
+      "bytes": 1376,
+      "sha256": "effbea30e91d5df5001dec6af163bc8458cd77e72f7739adb2e1f86a75164b61"
+    },
+    {
+      "path": "Yolo/training/train_yolo11s.py",
+      "bytes": 1767,
+      "sha256": "3840ba55b791713c1f885fa151061b3c88e992e635c97e0f2c83858a3541d0ea"
+    },
+    {
+      "path": "Yolo/training/train_yolo11s_protocol.py",
+      "bytes": 2376,
+      "sha256": "623a2f7a2496a0ffa3a02f7c006dbeb1b5c5b82a77693957e1b895d982ebf394"
+    },
+    {
+      "path": "Yolo/training/trainers/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "Yolo/training/trainers/yolo_protocol_trainer.py",
+      "bytes": 11117,
+      "sha256": "24d643392a2fa3c7382e9a342f2a7202a0a425bb297b7216c14557e81ef81c0c"
+    },
+    {
       "path": "controlled_diagnostics.py",
       "bytes": 11736,
       "sha256": "454e1fe6aced3e8eeeeaa1bcf6979c11a38ebef214b9b4393611154588c30d10"
+    },
+    {
+      "path": "project.py",
+      "bytes": 10162,
+      "sha256": "b3b9d05aa98e1493b886d504ae29a16110d5606d934798626a158fdcab87d833"
     },
     {
       "path": "reports/CONTROLLED_conditions.csv",
@@ -243,9 +348,19 @@
       "sha256": "902d025a873edaa5da26787e5a78b45f08aea80d16190092f5badf595677efd5"
     },
     {
+      "path": "requirements-legacy-3090.txt",
+      "bytes": 187,
+      "sha256": "55d283c187e5a287e10a30840ae8a6967ae6839062f310f8f9424512a9258a53"
+    },
+    {
       "path": "requirements-submission.txt",
-      "bytes": 192,
-      "sha256": "6bc5b1f073e6743137092acf2c89b474cefba4836b19b7ae31852ec5a6f991fc"
+      "bytes": 196,
+      "sha256": "3736172cbae449f8efbe73b7f3e014a22e71b78e94ce7fb1155db9762839e99b"
+    },
+    {
+      "path": "requirements.txt",
+      "bytes": 160,
+      "sha256": "cbaa65d88d8a80fa989db72b02c97fd9673aaa87c8190050b3e1037038849d68"
     },
     {
       "path": "robustness_benchmark.py",
@@ -254,13 +369,18 @@
     },
     {
       "path": "run_serial_benchmark.py",
-      "bytes": 15832,
-      "sha256": "c2ef76637211c3618c93ae8dbe0f140d3fdf8f1b2cf66b60c151d9dbadf47963"
+      "bytes": 16268,
+      "sha256": "5713761ba3224d586a6b241a4ec15d777de5908df1a35186f9717937c8067cb4"
+    },
+    {
+      "path": "tests/test_project_integration.py",
+      "bytes": 4857,
+      "sha256": "38220d14772950a9af1647b7d62ad43c6e0a13da6bbdc73dfe7a51f0b44f7af9"
     },
     {
       "path": "tools/package_submission.py",
-      "bytes": 5955,
-      "sha256": "caef5d33f778e55fb5dfb828cdf6fd72e5c3f9fe18e0f159c538d32bb1c78da6"
+      "bytes": 6333,
+      "sha256": "0c0f6a4f6ab682410e01a7ec301e545113aee32da63163c4de4b3740dd1c3b18"
     },
     {
       "path": "tools/reporting/analyze_p2_ablation.py",
