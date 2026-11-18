@@ -1,5 +1,3 @@
--r "Yolo Improeved/requirements.txt"
-torch==2.6.0
-torchvision==0.21.0
-faster-coco-eval==1.7.0
-kagglehub==1.0.3
+# Common dependency entry for the complete integrated project.
+# Install a compatible matched CUDA torch/torchvision pair first.
+-r requirements-submission.txt

@@ -81,8 +81,9 @@ def export_epochs(folder):
 
 
 class SerialQueue:
-    def __init__(self, root, out):
+    def __init__(self, root, out, allow_other_cuda=False):
         self.root, self.out = root, out
+        self.allow_other_cuda = allow_other_cuda
         self.lock = None
         self.child = None
         self.status = {'status': 'starting', 'pid': os.getpid(), 'updated_at': now(), 'current': None}
@@ -249,7 +250,7 @@ class SerialQueue:
                         seed=42, best_epoch=best_epoch, AP50=metric['AP50'], AP50_95=metric['AP50:95'],
                         precision=metric['precision'], recall=metric['recall'], F1=metric['F1'],
                         training_s=train_s, validation_s=sum(r['validation_s'] for r in history) if history else '',
-                        images_per_s=throughput, hardware='CPU' if method=='m1' else 'RTX 5090 D'))
+                        images_per_s=throughput, hardware='CPU' if method=='m1' else torch.cuda.get_device_name(0)))
         with (self.out/'comparison.csv').open('w', encoding='utf-8-sig', newline='') as file:
             writer=csv.DictWriter(file, fieldnames=list(rows[0])); writer.writeheader(); writer.writerows(rows)
         atomic_json(self.out/'comparison.json', rows)
@@ -257,7 +258,9 @@ class SerialQueue:
     def run(self):
         self.acquire()
         try:
-            if '5090' not in torch.cuda.get_device_name(0):
+            if not torch.cuda.is_available():
+                raise RuntimeError('The full deep benchmark requires a CUDA GPU')
+            if not self.allow_other_cuda and '5090' not in torch.cuda.get_device_name(0):
                 raise RuntimeError('This run is explicitly for the RTX 5090 D')
             if shutil.disk_usage(self.out).free < 16*1024**3:
                 raise RuntimeError('Need at least 16 GiB free for checkpoint retention')
@@ -310,5 +313,7 @@ if __name__ == '__main__':
     parser=argparse.ArgumentParser()
     parser.add_argument('--root',required=True)
     parser.add_argument('--out',default=str(HERE/'runs/5090d_batch8_seed42_20261117'))
+    parser.add_argument('--allow-other-cuda', action='store_true',
+                        help='Run the same protocol on another CUDA GPU; record its actual name')
     args=parser.parse_args()
-    SerialQueue(Path(args.root).resolve(), Path(args.out).resolve()).run()
+    SerialQueue(Path(args.root).resolve(), Path(args.out).resolve(), args.allow_other_cuda).run()
