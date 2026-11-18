@@ -1,6 +1,22 @@
 # M1: Multi-scale sliding window + HOG/colour features + Random Forest
 
-**Owner:** [your name] | **Group:** Group 104 | **Course:** COMP9517 2026 T3
+> Integration note: use the root project.py entry point and common requirements.
+> The timing/results narrative below is the original CPU experiment; the latest
+> matched-run records are reports/MAIN_comparison.csv and JSON. Do not pool runs.
+
+From the repository root:
+
+```text
+python project.py train --method m1 --root DATASET --run RUN
+python project.py infer --method m1 --root DATASET --run RUN --split val
+python project.py evaluate --method m1 --root DATASET --run RUN --split val
+```
+
+For final CPU timing add --split test --benchmark to inference after training
+choices are frozen. Ordinary inference uses one prediction pass; timing requires
+one image worker. Checkpoints and generated data stay under RUN/m1.
+
+**Group:** Group 104 | **Course:** COMP9517 2026 T3
 
 ## Summary of work completed
 
